@@ -1,0 +1,41 @@
+# --- secrets ---
+.env
+.env.local
+.env.*.local
+
+# --- python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# --- node ---
+node_modules/
+.next/
+out/
+.turbo/
+.vercel/
+
+# --- build artifacts ---
+dist/
+build/
+*.tsbuildinfo
+next-env.d.ts.bak
+
+# --- pipeline output ---
+output/
+!output/.gitkeep
+
+# --- editor ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# --- logs ---
+*.log
+npm-debug.log*
+yarn-error.log*

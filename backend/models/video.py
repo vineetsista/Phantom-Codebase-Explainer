@@ -1,0 +1,83 @@
+import enum
+import uuid
+from datetime import datetime
+
+from sqlalchemy import JSON, DateTime, Enum, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from .database import Base
+
+
+class VideoStatus(str, enum.Enum):
+    queued = "queued"
+    analyzing = "analyzing"
+    scripting = "scripting"
+    diagramming = "diagramming"
+    voiceover = "voiceover"
+    rendering = "rendering"
+    complete = "complete"
+    failed = "failed"
+
+
+def _uuid() -> str:
+    return str(uuid.uuid4())
+
+
+class Video(Base):
+    __tablename__ = "videos"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    repo_url: Mapped[str] = mapped_column(Text, nullable=False)
+    repo_name: Mapped[str] = mapped_column(String(255), default="")
+    repo_owner: Mapped[str] = mapped_column(String(255), default="")
+    repo_description: Mapped[str] = mapped_column(Text, default="")
+    repo_stars: Mapped[int] = mapped_column(Integer, default=0)
+    repo_language: Mapped[str] = mapped_column(String(64), default="")
+
+    status: Mapped[VideoStatus] = mapped_column(
+        Enum(VideoStatus, name="video_status"), default=VideoStatus.queued, nullable=False
+    )
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    status_details: Mapped[dict] = mapped_column(JSON, default=dict)
+    error_message: Mapped[str] = mapped_column(Text, default="")
+
+    script_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    analysis_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    video_url: Mapped[str] = mapped_column(Text, default="")
+    thumbnail_url: Mapped[str] = mapped_column(Text, default="")
+
+    duration_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    video_quality: Mapped[str] = mapped_column(String(16), default="720p")
+    has_watermark: Mapped[bool] = mapped_column(default=True)
+    voice_provider: Mapped[str] = mapped_column(String(32), default="openai")
+
+    view_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "repo_url": self.repo_url,
+            "repo_name": self.repo_name,
+            "repo_owner": self.repo_owner,
+            "repo_description": self.repo_description,
+            "repo_stars": self.repo_stars,
+            "repo_language": self.repo_language,
+            "status": self.status.value if isinstance(self.status, VideoStatus) else self.status,
+            "progress": self.progress,
+            "status_details": self.status_details or {},
+            "error_message": self.error_message,
+            "video_url": self.video_url,
+            "thumbnail_url": self.thumbnail_url,
+            "duration_seconds": self.duration_seconds,
+            "video_quality": self.video_quality,
+            "has_watermark": self.has_watermark,
+            "voice_provider": self.voice_provider,
+            "view_count": self.view_count,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "script_data": self.script_data,
+            "analysis_data": self.analysis_data,
+        }

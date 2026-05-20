@@ -1,0 +1,156 @@
+"""Generate an SVG architecture diagram from analysis modules.
+
+Output is a plain SVG string. Remotion compositions consume the same module
+data directly, but the SVG is also written to disk so it can be embedded in
+fallback (ffmpeg-only) renders and used as a thumbnail.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+# Brand-aligned palette: deep black background, electric cyan, soft purple.
+BG = "#0A0A0B"
+ACCENT_PRIMARY = "#00F0FF"
+ACCENT_SECONDARY = "#7B61FF"
+TEXT = "#F5F5F0"
+GRID = "#1A1A1F"
+
+BOX_COLORS = [
+    "#00F0FF",  # cyan
+    "#7B61FF",  # purple
+    "#34D399",  # emerald
+    "#F59E0B",  # amber
+    "#F472B6",  # pink
+    "#60A5FA",  # blue
+    "#A78BFA",  # violet
+    "#FB7185",  # rose
+]
+
+
+def generate(analysis: dict[str, Any] | object, output_path: Path) -> str:
+    """Render an SVG diagram of the architecture and write it to disk.
+
+    Accepts either an `AnalysisResult` instance or its `.to_dict()` form.
+    """
+    if hasattr(analysis, "to_dict"):
+        data = analysis.to_dict()
+    else:
+        data = analysis
+
+    modules = data.get("modules") or []
+    if not modules:
+        modules = [
+            {"name": "src", "role": "Source", "description": "Primary source tree"}
+        ]
+
+    repo = data.get("repo", {})
+    title = repo.get("name", "Repository")
+    subtitle = data.get("architecture_hint", "architecture")
+
+    svg = _render_svg(title, subtitle, modules)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(svg, encoding="utf-8")
+    return svg
+
+
+def _render_svg(title: str, subtitle: str, modules: list[dict]) -> str:
+    width, height = 1920, 1080
+    cols = min(4, max(2, len(modules)))
+    rows = max(1, (len(modules) + cols - 1) // cols)
+
+    box_w, box_h = 380, 180
+    gutter_x = (width - cols * box_w) // (cols + 1)
+    gutter_y = 80
+    top_offset = 240
+
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
+        f'width="{width}" height="{height}" font-family="Inter, system-ui, sans-serif">',
+        f'<rect width="{width}" height="{height}" fill="{BG}"/>',
+        _grid_pattern(width, height),
+        f'<text x="{width // 2}" y="120" text-anchor="middle" font-size="64" '
+        f'font-weight="700" fill="{TEXT}">{_escape(title)}</text>',
+        f'<text x="{width // 2}" y="180" text-anchor="middle" font-size="28" '
+        f'fill="{ACCENT_PRIMARY}" opacity="0.85">{_escape(subtitle)}</text>',
+    ]
+
+    centers: list[tuple[int, int]] = []
+    for index, module in enumerate(modules[: cols * rows]):
+        col = index % cols
+        row = index // cols
+        x = gutter_x + col * (box_w + gutter_x)
+        y = top_offset + row * (box_h + gutter_y)
+        color = BOX_COLORS[index % len(BOX_COLORS)]
+
+        parts.append(
+            f'<rect x="{x}" y="{y}" width="{box_w}" height="{box_h}" rx="20" ry="20" '
+            f'fill="#111118" stroke="{color}" stroke-width="2" opacity="0.96"/>'
+        )
+        parts.append(
+            f'<rect x="{x}" y="{y}" width="{box_w}" height="{box_h}" rx="20" ry="20" '
+            f'fill="url(#glow-{index})" opacity="0.18"/>'
+        )
+        parts.append(
+            f'<text x="{x + 28}" y="{y + 56}" font-size="32" font-weight="700" '
+            f'fill="{TEXT}">{_escape(module.get("name", ""))}</text>'
+        )
+        parts.append(
+            f'<text x="{x + 28}" y="{y + 96}" font-size="20" '
+            f'fill="{color}">{_escape(module.get("role", ""))}</text>'
+        )
+        description = (module.get("description") or "")[:80]
+        parts.append(
+            f'<text x="{x + 28}" y="{y + 138}" font-size="18" fill="{TEXT}" '
+            f'opacity="0.65">{_escape(description)}</text>'
+        )
+        centers.append((x + box_w // 2, y + box_h // 2))
+
+    # Connecting arcs from each box to the next (simple chain layout).
+    arcs = []
+    for (x1, y1), (x2, y2) in zip(centers, centers[1:]):
+        mid_x = (x1 + x2) // 2
+        mid_y = min(y1, y2) - 40
+        arcs.append(
+            f'<path d="M {x1} {y1} Q {mid_x} {mid_y}, {x2} {y2}" '
+            f'fill="none" stroke="{ACCENT_PRIMARY}" stroke-width="1.5" '
+            f'opacity="0.4" stroke-dasharray="6 8"/>'
+        )
+
+    defs = ['<defs>']
+    for index in range(min(len(modules), cols * rows)):
+        color = BOX_COLORS[index % len(BOX_COLORS)]
+        defs.append(
+            f'<radialGradient id="glow-{index}" cx="50%" cy="50%" r="60%">'
+            f'<stop offset="0%" stop-color="{color}" stop-opacity="0.7"/>'
+            f'<stop offset="100%" stop-color="{color}" stop-opacity="0"/>'
+            f'</radialGradient>'
+        )
+    defs.append('</defs>')
+
+    parts = [parts[0]] + defs + parts[1:] + arcs + [
+        f'<text x="{width // 2}" y="{height - 40}" text-anchor="middle" '
+        f'font-size="16" fill="{TEXT}" opacity="0.4">Generated by Phantom · RepoX</text>',
+        '</svg>',
+    ]
+    return "\n".join(parts)
+
+
+def _grid_pattern(width: int, height: int) -> str:
+    return (
+        '<defs>'
+        '<pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">'
+        f'<path d="M 40 0 L 0 0 0 40" fill="none" stroke="{GRID}" stroke-width="1"/>'
+        '</pattern>'
+        '</defs>'
+        f'<rect width="{width}" height="{height}" fill="url(#grid)" opacity="0.6"/>'
+    )
+
+
+def _escape(text: str) -> str:
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )

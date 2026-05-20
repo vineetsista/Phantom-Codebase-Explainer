@@ -1,0 +1,166 @@
+import React from "react";
+import {
+  AbsoluteFill,
+  interpolate,
+  spring,
+  useCurrentFrame,
+  useVideoConfig,
+} from "remotion";
+
+import { AnimatedCounter } from "../components/AnimatedCounter";
+import { BackgroundGrid } from "../components/BackgroundGrid";
+import { CodeRain } from "../components/CodeRain";
+import { LogoMark } from "../components/LogoMark";
+import { Watermark } from "../components/Watermark";
+import { COLORS, type ScriptSection } from "../types";
+
+export const IntroScene: React.FC<{ section: ScriptSection }> = ({ section }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+
+  const data = section.visuals?.data as {
+    title?: string;
+    subtitle?: string;
+    stars?: number;
+    language?: string;
+  };
+
+  const logoStart = 0;
+  const kickerStart = 18;
+  const titleStart = 28;
+  const subtitleStart = 46;
+  const metaStart = 58;
+
+  const titleSpring = spring({
+    frame: frame - titleStart,
+    fps,
+    config: { damping: 18, stiffness: 120 },
+  });
+  const titleY = interpolate(titleSpring, [0, 1], [40, 0]);
+  const subtitleOpacity = interpolate(frame, [subtitleStart, subtitleStart + 16], [0, 1], {
+    extrapolateRight: "clamp",
+  });
+  const metaOpacity = interpolate(frame, [metaStart, metaStart + 16], [0, 1], {
+    extrapolateRight: "clamp",
+  });
+  const kickerOpacity = interpolate(frame, [kickerStart, kickerStart + 12], [0, 1], {
+    extrapolateRight: "clamp",
+  });
+
+  return (
+    <AbsoluteFill>
+      <BackgroundGrid />
+      <CodeRain />
+
+      <AbsoluteFill style={center}>
+        <LogoMark size={120} startFrame={logoStart} />
+
+        <div
+          style={{
+            opacity: kickerOpacity,
+            marginTop: 36,
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            fontSize: 18,
+            letterSpacing: 6,
+            textTransform: "uppercase",
+            color: COLORS.cyan,
+          }}
+        >
+          PHANTOM · CODEBASE EXPLAINER
+        </div>
+
+        <div
+          style={{
+            opacity: titleSpring,
+            transform: `translateY(${titleY}px)`,
+            marginTop: 32,
+            fontFamily: "Inter, system-ui, sans-serif",
+            fontSize: 128,
+            fontWeight: 800,
+            letterSpacing: -2,
+            color: COLORS.text,
+            textAlign: "center",
+            maxWidth: 1500,
+            lineHeight: 1.05,
+          }}
+        >
+          {data?.title ?? "Repository"}
+        </div>
+
+        <div
+          style={{
+            opacity: subtitleOpacity,
+            marginTop: 24,
+            maxWidth: 1200,
+            textAlign: "center",
+            fontFamily: "Inter, system-ui, sans-serif",
+            fontSize: 30,
+            color: "rgba(245,245,240,0.7)",
+            lineHeight: 1.3,
+          }}
+        >
+          {data?.subtitle ?? section.narration}
+        </div>
+
+        <div
+          style={{
+            opacity: metaOpacity,
+            marginTop: 36,
+            display: "flex",
+            gap: 16,
+            fontFamily: "Inter, system-ui, sans-serif",
+            fontSize: 22,
+            color: COLORS.text,
+          }}
+        >
+          {data?.language && <Pill label={data.language} accent={COLORS.cyan} />}
+          {typeof data?.stars === "number" && data.stars > 0 && (
+            <Pill
+              accent={COLORS.violet}
+              custom={
+                <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+                  <span>★</span>
+                  <AnimatedCounter
+                    value={data.stars}
+                    startFrame={metaStart}
+                    durationFrames={36}
+                    fontSize={22}
+                  />
+                </span>
+              }
+            />
+          )}
+        </div>
+      </AbsoluteFill>
+      <Watermark />
+    </AbsoluteFill>
+  );
+};
+
+const Pill: React.FC<{
+  label?: string;
+  accent: string;
+  custom?: React.ReactNode;
+}> = ({ label, accent, custom }) => (
+  <div
+    style={{
+      padding: "12px 24px",
+      borderRadius: 999,
+      border: `1px solid ${accent}55`,
+      background: `${accent}10`,
+      color: accent,
+      display: "inline-flex",
+      alignItems: "center",
+    }}
+  >
+    {custom ?? label}
+  </div>
+);
+
+const center: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 80,
+};

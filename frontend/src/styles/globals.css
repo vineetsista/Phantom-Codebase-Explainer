@@ -1,0 +1,311 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================================================
+   FONTS — self-hosted, drop .woff2 files into /public/fonts/.
+   The browser uses system fallbacks until the files exist.
+   ========================================================================= */
+
+@font-face {
+  font-family: "Clash Display";
+  src: url("/fonts/clash-display-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Clash Display";
+  src: url("/fonts/clash-display-600.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Clash Display";
+  src: url("/fonts/clash-display-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Satoshi";
+  src: url("/fonts/satoshi-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Satoshi";
+  src: url("/fonts/satoshi-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Satoshi";
+  src: url("/fonts/satoshi-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/jetbrains-mono-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/jetbrains-mono-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/jetbrains-mono-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* =========================================================================
+   ROOT TOKENS — see tailwind.config.ts for the full palette
+   ========================================================================= */
+
+:root {
+  --color-void: #050507;
+  --color-ink: #0a0a0b;
+  --color-graphite: #14141a;
+  --color-smoke: #1f1f28;
+  --color-bone: #f5f5f0;
+  --color-fog: #a8a8b3;
+  --color-mist: #6b6b78;
+  --color-electric: #00f0ff;
+  --color-plasma: #7b61ff;
+  --color-ember: #ff6b35;
+
+  --ease-luxe: cubic-bezier(0.16, 1, 0.3, 1);
+
+  color-scheme: dark;
+  -webkit-text-size-adjust: 100%;
+}
+
+html,
+body {
+  background: var(--color-void);
+  color: var(--color-bone);
+  font-family: "Satoshi", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  min-height: 100%;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "ss01", "cv11";
+}
+
+/* Hide native cursor on pointer-capable devices so the custom cursor takes over.
+   Reverts on touch / coarse pointer devices so we don't break mobile. */
+@media (hover: hover) and (pointer: fine) {
+  html.has-custom-cursor,
+  html.has-custom-cursor * {
+    cursor: none !important;
+  }
+}
+
+/* Respect users who opted out of motion. Disables animations and transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Background atmosphere — sits behind everything, fixed so it doesn't scroll.
+   Two slow blurred gradient blobs + a faint grid. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(
+      ellipse 60% 50% at 18% -5%,
+      rgba(0, 240, 255, 0.10),
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse 70% 55% at 82% 110%,
+      rgba(123, 97, 255, 0.13),
+      transparent 60%
+    );
+  pointer-events: none;
+  z-index: -2;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: linear-gradient(
+      rgba(255, 255, 255, 0.025) 1px,
+      transparent 1px
+    ),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 80px 80px;
+  mask-image: radial-gradient(ellipse at center, #000 25%, transparent 75%);
+  -webkit-mask-image: radial-gradient(
+    ellipse at center,
+    #000 25%,
+    transparent 75%
+  );
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* =========================================================================
+   UTILITIES
+   ========================================================================= */
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .font-display {
+    font-family: "Clash Display", ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+
+  .gradient-text-cyan {
+    background: linear-gradient(
+      120deg,
+      var(--color-bone) 0%,
+      var(--color-electric) 60%,
+      var(--color-plasma) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .accent-electric {
+    color: var(--color-electric);
+  }
+  .accent-plasma {
+    color: var(--color-plasma);
+  }
+  .accent-ember {
+    color: var(--color-ember);
+  }
+
+  .glow-electric {
+    box-shadow:
+      0 0 0 1px rgba(0, 240, 255, 0.35),
+      0 0 32px -4px rgba(0, 240, 255, 0.55),
+      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+  .glow-plasma {
+    box-shadow:
+      0 0 0 1px rgba(123, 97, 255, 0.35),
+      0 0 36px -4px rgba(123, 97, 255, 0.55);
+  }
+  .glow-ember {
+    box-shadow:
+      0 0 0 1px rgba(255, 107, 53, 0.4),
+      0 0 32px -4px rgba(255, 107, 53, 0.5);
+  }
+
+  .surface-1 {
+    background: linear-gradient(
+      180deg,
+      rgba(20, 20, 26, 0.85),
+      rgba(20, 20, 26, 0.6)
+    );
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+
+  .surface-2 {
+    background: linear-gradient(
+      180deg,
+      rgba(31, 31, 40, 0.75),
+      rgba(31, 31, 40, 0.45)
+    );
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+
+  /* Editorial kicker — small uppercase label above section headlines. */
+  .kicker {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--color-electric);
+  }
+
+  /* Subtle pulsing dot used for the "live" indicator. */
+  .live-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--color-electric);
+    box-shadow: 0 0 12px var(--color-electric);
+    animation: livePulse 1.6s ease-in-out infinite;
+  }
+  @keyframes livePulse {
+    0%, 100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.55;
+      transform: scale(0.85);
+    }
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-void);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 240, 255, 0.12);
+  border-radius: 8px;
+  transition: background 200ms;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 240, 255, 0.28);
+}
+
+/* Selection */
+::selection {
+  background: rgba(0, 240, 255, 0.3);
+  color: var(--color-bone);
+}
+
+/* Focus rings — keyboard only, custom-styled */
+:focus-visible {
+  outline: 2px solid var(--color-electric);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  outline-offset: 6px;
+}
