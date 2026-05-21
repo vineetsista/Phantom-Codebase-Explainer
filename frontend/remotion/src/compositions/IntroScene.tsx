@@ -17,6 +17,7 @@ import { LogoMark } from "../components/LogoMark";
 import { Particles } from "../components/Particles";
 import { TypewriterText } from "../components/TypewriterText";
 import { Watermark } from "../components/Watermark";
+import { formatRelative, formatYear } from "../components/formatDate";
 import { FONT_BODY, FONT_DISPLAY, FONT_MONO } from "../loadFonts";
 import { COLORS, type ScriptSection } from "../types";
 
@@ -28,7 +29,11 @@ export const IntroScene: React.FC<{ section: ScriptSection }> = ({ section }) =>
     title?: string;
     subtitle?: string;
     stars?: number;
+    forks?: number;
     language?: string;
+    /** ISO-8601 timestamps from the GitHub API. */
+    created_at?: string;
+    pushed_at?: string;
   };
 
   const logoStart = 0;
@@ -128,34 +133,96 @@ export const IntroScene: React.FC<{ section: ScriptSection }> = ({ section }) =>
           {data?.subtitle ?? section.narration}
         </div>
 
-        <div
-          style={{
-            opacity: metaOpacity,
-            marginTop: 36,
-            display: "flex",
-            gap: 16,
-            fontFamily: FONT_BODY,
-            fontSize: 22,
-            color: COLORS.text,
-          }}
-        >
-            {data?.language && <Pill label={data.language} accent={COLORS.cyan} />}
-            {typeof data?.stars === "number" && data.stars > 0 && (
-              <Pill
-                accent={COLORS.violet}
-                custom={
-                  <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-                    <span>★</span>
+          {/* Real GitHub metadata strip. Counters tick up from 0 to actual
+              values over ~800ms with a 90ms stagger so the eye follows
+              left-to-right. Four cells: stars · forks · first commit year
+              · last update. Numbers come straight from the GitHub REST API
+              via repo_analyzer; nothing made up. */}
+          <div
+            style={{
+              opacity: metaOpacity,
+              marginTop: 36,
+              display: "flex",
+              alignItems: "center",
+              gap: 0,
+              fontFamily: FONT_BODY,
+              color: COLORS.text,
+              border: `1px solid rgba(255,255,255,0.08)`,
+              background: "rgba(17,17,24,0.55)",
+              borderRadius: 999,
+              padding: "12px 14px",
+              backdropFilter: "blur(8px)",
+            }}
+          >
+            <StatCell
+              startFrame={metaStart}
+              kicker={data?.language || "Code"}
+              valueNode={
+                typeof data?.stars === "number" && data.stars > 0 ? (
+                  <>
+                    <span style={{ color: COLORS.cyan, marginRight: 8 }}>★</span>
                     <AnimatedCounter
                       value={data.stars}
-                      startFrame={metaStart}
-                      durationFrames={36}
-                      fontSize={22}
+                      startFrame={metaStart + 2}
+                      durationFrames={24}
+                      fontSize={28}
                     />
-                  </span>
-                }
-              />
-            )}
+                  </>
+                ) : (
+                  <span style={{ color: "rgba(245,245,240,0.5)" }}>—</span>
+                )
+              }
+              label="stars"
+            />
+            <Divider />
+            <StatCell
+              startFrame={metaStart + 3}
+              kicker="Forks"
+              valueNode={
+                <AnimatedCounter
+                  value={data?.forks ?? 0}
+                  startFrame={metaStart + 5}
+                  durationFrames={24}
+                  fontSize={28}
+                />
+              }
+              label="forks"
+            />
+            <Divider />
+            <StatCell
+              startFrame={metaStart + 6}
+              kicker="Since"
+              valueNode={
+                <span
+                  style={{
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                    fontVariantNumeric: "tabular-nums",
+                    fontSize: 28,
+                    color: COLORS.text,
+                  }}
+                >
+                  {formatYear(data?.created_at)}
+                </span>
+              }
+              label="first commit"
+            />
+            <Divider />
+            <StatCell
+              startFrame={metaStart + 9}
+              kicker="Updated"
+              valueNode={
+                <span
+                  style={{
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                    fontSize: 20,
+                    color: COLORS.text,
+                  }}
+                >
+                  {formatRelative(data?.pushed_at)}
+                </span>
+              }
+              label="last push"
+            />
           </div>
         </AbsoluteFill>
       </CameraMove>
@@ -164,24 +231,81 @@ export const IntroScene: React.FC<{ section: ScriptSection }> = ({ section }) =>
   );
 };
 
-const Pill: React.FC<{
-  label?: string;
-  accent: string;
-  custom?: React.ReactNode;
-}> = ({ label, accent, custom }) => (
+const StatCell: React.FC<{
+  startFrame: number;
+  kicker: string;
+  valueNode: React.ReactNode;
+  label: string;
+}> = ({ startFrame, kicker, valueNode, label }) => {
+  const frame = useCurrentFrame();
+  const opacity = interpolate(frame, [startFrame, startFrame + 14], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const y = interpolate(frame, [startFrame, startFrame + 14], [10, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  return (
+    <div
+      style={{
+        opacity,
+        transform: `translateY(${y}px)`,
+        padding: "4px 20px",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 2,
+        minWidth: 130,
+      }}
+    >
+      <div
+        style={{
+          fontFamily: FONT_MONO,
+          fontSize: 10,
+          letterSpacing: 3,
+          textTransform: "uppercase",
+          color: "rgba(245,245,240,0.45)",
+        }}
+      >
+        {kicker}
+      </div>
+      <div
+        style={{
+          fontFamily: FONT_DISPLAY,
+          fontWeight: 700,
+          display: "flex",
+          alignItems: "center",
+          lineHeight: 1,
+          marginTop: 2,
+        }}
+      >
+        {valueNode}
+      </div>
+      <div
+        style={{
+          fontFamily: FONT_MONO,
+          fontSize: 10,
+          letterSpacing: 2,
+          textTransform: "uppercase",
+          color: "rgba(245,245,240,0.35)",
+          marginTop: 2,
+        }}
+      >
+        {label}
+      </div>
+    </div>
+  );
+};
+
+const Divider: React.FC = () => (
   <div
     style={{
-      padding: "12px 24px",
-      borderRadius: 999,
-      border: `1px solid ${accent}55`,
-      background: `${accent}10`,
-      color: accent,
-      display: "inline-flex",
-      alignItems: "center",
+      width: 1,
+      height: 56,
+      background: "rgba(255,255,255,0.08)",
     }}
-  >
-    {custom ?? label}
-  </div>
+  />
 );
 
 const center: React.CSSProperties = {

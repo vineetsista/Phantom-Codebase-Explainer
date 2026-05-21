@@ -595,9 +595,27 @@ def _normalize(script: dict[str, Any], analysis: AnalysisResult) -> dict[str, An
         if required not in deduped:
             deduped[required] = _default_section(required, analysis)
 
-    # 3. Force the architecture and code_walkthrough scenes to use the
-    # analyzer's real data. Narration is kept (Claude is allowed to talk
-    # about whatever it likes); only the visual data is overwritten.
+    # 3. Force the intro, architecture, and code_walkthrough scenes to use
+    # the analyzer's real data. Narration is kept (Claude is allowed to
+    # talk about whatever it likes); only the visual data is overwritten.
+    # This is what keeps the GitHub stats / module list / code excerpt
+    # honest no matter what Claude returns.
+    repo = analysis.repo or {}
+    intro = deduped.get("intro")
+    if intro is not None:
+        intro["visuals"] = {
+            "type": "intro_card",
+            "data": {
+                "title": repo.get("name") or "Repository",
+                "subtitle": repo.get("description") or "",
+                "stars": int(repo.get("stars") or 0),
+                "forks": int(repo.get("forks") or 0),
+                "language": repo.get("primary_language") or "",
+                "created_at": repo.get("created_at") or "",
+                "pushed_at": repo.get("pushed_at") or "",
+            },
+        }
+
     arch = deduped.get("architecture")
     if arch is not None:
         # Strip CI / editor / dependency directories. They show up as modules
@@ -717,7 +735,10 @@ def _default_section(section_id: str, analysis: AnalysisResult) -> dict[str, Any
                     "title": name,
                     "subtitle": repo.get("description") or "Codebase explainer",
                     "stars": repo.get("stars", 0),
+                    "forks": repo.get("forks", 0),
                     "language": primary_lang,
+                    "created_at": repo.get("created_at", ""),
+                    "pushed_at": repo.get("pushed_at", ""),
                 },
             },
         }

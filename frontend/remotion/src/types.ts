@@ -25,6 +25,14 @@ export interface VideoScript {
   total_duration_seconds: number;
   sections: ScriptSection[];
   key_takeaways: string[];
+  /** Single sentence that ties the takeaways back to the hook. Rendered on
+   * the first beat of the OutroScene. */
+  why_it_matters?: string;
+  /** Canonical chapter list — computed by video_assembler.compute_chapters
+   * and embedded in script_data. The frontend player consumes this
+   * directly. The Remotion composition doesn't need it but it's part of
+   * the same shared object. */
+  chapters?: { id: string; title: string; start_seconds: number }[];
 }
 
 export interface AudioSegment {

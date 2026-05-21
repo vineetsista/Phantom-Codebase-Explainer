@@ -19,19 +19,40 @@ import { COLORS, type ScriptSection } from "../types";
 export const OutroScene: React.FC<{
   section: ScriptSection;
   takeaways: string[];
-}> = ({ section, takeaways }) => {
+  whyItMatters?: string;
+}> = ({ section, takeaways, whyItMatters }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const items = takeaways.length ? takeaways : ((section.visuals?.data as { takeaways?: string[] })?.takeaways ?? []);
 
-  const headerSpring = spring({ frame, fps, config: SETTLE });
-
-  // Estimate the scene's frame budget so HaloRings fire at the right time.
-  // Same calculation as in CodeWalkthroughScene.
+  // Scene plan: three beats inside the same allocated frame budget.
+  //   Beat 1: "Why this matters" frame                ~0   → 30%
+  //   Beat 2: KEY TAKEAWAYS list                      ~30% → 88%
+  //   Beat 3: sonar-ping brand finale                 ~88% → end
   const totalFrames = Math.round(
     ((section.audio_duration_seconds ?? section.duration_seconds ?? 12) + 1.0) * 30,
   );
+  const beat1End = Math.round(totalFrames * 0.30);
+  const beat2Start = beat1End - 12;       // 12-frame crossfade overlap
   const haloStart = Math.max(0, totalFrames - 60);
+
+  const why = (whyItMatters || "").trim();
+  // First beat fades out as the takeaways come in.
+  const whyOpacity = interpolate(
+    frame,
+    [12, 30, beat1End - 12, beat1End],
+    [0, 1, 1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+  // Takeaways crossfade in at beat 2.
+  const takeawaysOpacity = interpolate(
+    frame,
+    [beat2Start, beat2Start + 18],
+    [0, 1],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+
+  const headerSpring = spring({ frame: frame - beat2Start, fps, config: SETTLE });
 
   return (
     <AbsoluteFill>
@@ -39,6 +60,49 @@ export const OutroScene: React.FC<{
       <Particles count={22} seed={items.length * 23 + 7} speed={0.6} />
       <FocusGlow x={50} y={50} radius={70} intensity={0.10} />
       <CameraMove pan="right" intensity={1}>
+      {/* BEAT 1 — "Why this matters" frame. Single sentence, big and
+          centred. Crossfades to beat 2. */}
+      {why && (
+        <AbsoluteFill
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 120,
+            opacity: whyOpacity,
+          }}
+        >
+          <div
+            style={{
+              fontFamily: FONT_MONO,
+              fontSize: 18,
+              letterSpacing: 6,
+              textTransform: "uppercase",
+              color: COLORS.cyan,
+            }}
+          >
+            Why this matters
+          </div>
+          <div
+            style={{
+              marginTop: 36,
+              maxWidth: 1500,
+              textAlign: "center",
+              fontFamily: FONT_DISPLAY,
+              fontSize: 56,
+              fontWeight: 700,
+              color: COLORS.text,
+              lineHeight: 1.15,
+              letterSpacing: -0.5,
+            }}
+          >
+            {why}
+          </div>
+        </AbsoluteFill>
+      )}
+
+      {/* BEAT 2 — Key takeaways list. Fades in as beat 1 fades out. */}
       <AbsoluteFill
         style={{
           display: "flex",
@@ -47,6 +111,7 @@ export const OutroScene: React.FC<{
           justifyContent: "center",
           padding: 100,
           fontFamily: FONT_DISPLAY,
+          opacity: takeawaysOpacity,
         }}
       >
         <div
@@ -68,7 +133,7 @@ export const OutroScene: React.FC<{
             // Stagger 250ms between cards (~8 frames at 30fps). Each card
             // arrives with a small rotateZ correction — starts tilted, settles
             // straight — for a "snapping into place" feel.
-            const enterFrame = 18 + index * 8;
+            const enterFrame = beat2Start + 18 + index * 8;
             const enterSpring = spring({
               frame: frame - enterFrame,
               fps,

@@ -21,7 +21,11 @@ import {
 // renderer waits for the first paint until the FontFaces resolve (or fail).
 loadFonts();
 
-function renderScene(section: ScriptSection, takeaways: string[]) {
+function renderScene(
+  section: ScriptSection,
+  takeaways: string[],
+  whyItMatters?: string,
+) {
   switch (section.id) {
     case "intro":
       return <IntroScene section={section} />;
@@ -30,7 +34,13 @@ function renderScene(section: ScriptSection, takeaways: string[]) {
     case "code_walkthrough":
       return <CodeWalkthroughScene section={section} />;
     case "summary":
-      return <OutroScene section={section} takeaways={takeaways} />;
+      return (
+        <OutroScene
+          section={section}
+          takeaways={takeaways}
+          whyItMatters={whyItMatters}
+        />
+      );
     default:
       return <IntroScene section={section} />;
   }
@@ -84,7 +94,11 @@ export const PhantomVideo: React.FC<CompositionProps> = ({
               durationInFrames={frames}
               transitionFrames={transitionFrames}
             >
-              {renderScene(section, script.key_takeaways ?? [])}
+              {renderScene(
+                section,
+                script.key_takeaways ?? [],
+                script.why_it_matters,
+              )}
             </SceneFrame>
             {audioTrack?.audio_path && (
               <Audio src={resolveAudio(audioTrack.audio_path)} />

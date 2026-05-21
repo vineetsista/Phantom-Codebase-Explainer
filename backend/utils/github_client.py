@@ -12,9 +12,13 @@ class RepoMetadata:
     name: str
     description: str
     stars: int
+    forks: int
     primary_language: str
     default_branch: str
     clone_url: str
+    # ISO-8601 timestamps. Empty string when unknown (network failure, stub).
+    created_at: str
+    pushed_at: str
 
 
 _GITHUB_URL_RE = re.compile(
@@ -52,9 +56,14 @@ def fetch_metadata(repo_url: str) -> RepoMetadata:
             name=name,
             description=data.get("description") or "",
             stars=int(data.get("stargazers_count") or 0),
+            forks=int(data.get("forks_count") or 0),
             primary_language=data.get("language") or "",
             default_branch=data.get("default_branch") or "main",
             clone_url=data.get("clone_url") or f"https://github.com/{owner}/{name}.git",
+            # GitHub returns ISO-8601 with a trailing Z. Empty string when
+            # the repo is brand new and these fields are null.
+            created_at=data.get("created_at") or "",
+            pushed_at=data.get("pushed_at") or "",
         )
     except Exception:
         return RepoMetadata(
@@ -62,7 +71,10 @@ def fetch_metadata(repo_url: str) -> RepoMetadata:
             name=name,
             description="",
             stars=0,
+            forks=0,
             primary_language="",
             default_branch="main",
             clone_url=f"https://github.com/{owner}/{name}.git",
+            created_at="",
+            pushed_at="",
         )
