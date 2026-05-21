@@ -330,6 +330,7 @@ def generate(
                 section_id, len(narration), len(prepared),
             )
 
+        alignment: dict[str, Any] | None = None
         try:
             if chosen == "openai":
                 # OpenAI's TTS doesn't honor ElevenLabs <break> tags — strip
@@ -337,7 +338,7 @@ def generate(
                 openai_text = re.sub(r'<break[^/]*/>', "", prepared).strip()
                 _generate_openai(openai_text, out_path, settings.openai_api_key)
             elif chosen == "elevenlabs":
-                _generate_elevenlabs(
+                alignment = _generate_elevenlabs(
                     prepared,
                     out_path,
                     settings.elevenlabs_api_key,
@@ -408,7 +409,7 @@ def generate(
             logger.error(msg)
             raise TTSConfigError(msg)
 
-        results.append(_segment(section_id, out_path, duration, chosen))
+        results.append(_segment(section_id, out_path, duration, chosen, alignment))
 
     return results
 
@@ -418,6 +419,7 @@ def _segment(
     out_path: Path,
     duration: int,
     provider: str,
+    alignment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     # Probe the file we just wrote. If ffprobe is unavailable or the file is
     # the silent-WAV placeholder, fall back to the estimated duration.
@@ -426,6 +428,11 @@ def _segment(
     return {
         "section_id": section_id,
         "audio_path": str(out_path),
+        # Optional per-character alignment from ElevenLabs with-timestamps.
+        # The worker uses this to relocate narration_start_seconds on each
+        # architecture module + each code highlight to the moment its name
+        # is actually spoken.
+        "alignment": alignment,
         # `duration_seconds` is the original (estimated) value for backwards
         # compatibility with anything that already reads it.
         "duration_seconds": duration,
@@ -434,6 +441,130 @@ def _segment(
         "audio_duration_seconds": round(actual, 3),
         "provider": provider,
     }
+
+
+def find_phrase_time(
+    alignment: dict[str, Any] | None, phrase: str
+) -> float | None:
+    """Locate `phrase` in the per-character alignment data and return the
+    start time (in seconds) of its first character. Case- and
+    whitespace-insensitive match against the concatenated characters.
+
+    Returns None when alignment is missing, when the phrase isn't found,
+    or when the phrase is too short to be reliable (<= 2 chars).
+    """
+    if not alignment or not phrase or len(phrase.strip()) <= 2:
+        return None
+    chars = alignment.get("characters") or []
+    starts = alignment.get("character_start_times_seconds") or []
+    if not chars or len(chars) != len(starts):
+        return None
+    haystack = "".join(chars).lower()
+    needle = phrase.lower()
+    idx = haystack.find(needle)
+    if idx < 0:
+        # Try collapsing whitespace + punctuation for a fuzzier match —
+        # narration sometimes splits identifiers with spaces ("apple Check")
+        # while the script's module label is one word ("appleCheck").
+        squashed_h = re.sub(r"[^a-z0-9]+", "", haystack)
+        squashed_n = re.sub(r"[^a-z0-9]+", "", needle)
+        if not squashed_n:
+            return None
+        squashed_idx = squashed_h.find(squashed_n)
+        if squashed_idx < 0:
+            return None
+        # Map the squashed index back to the original character index.
+        kept = 0
+        for i, ch in enumerate(haystack):
+            if re.match(r"[a-z0-9]", ch):
+                if kept == squashed_idx:
+                    idx = i
+                    break
+                kept += 1
+        if idx < 0:
+            return None
+    try:
+        return float(starts[idx])
+    except (IndexError, ValueError, TypeError):
+        return None
+
+
+def sync_visuals_to_alignment(
+    script: dict[str, Any], audio_files: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Rewrite `narration_start_seconds` on every visual element where we
+    have alignment data — so architecture modules pop up when their name
+    is actually spoken, and code highlights tick over when their target
+    function/line content lands in the audio.
+
+    Search keys per element:
+      - Architecture module:        label, then file_path
+      - Code walkthrough highlight: code (line text — distinctive),
+                                    fallback to annotation
+    """
+    align_by_section = {
+        a["section_id"]: a.get("alignment")
+        for a in audio_files
+        if a.get("alignment")
+    }
+    if not align_by_section:
+        return script
+
+    for section in script.get("sections", []):
+        sid = section.get("id")
+        alignment = align_by_section.get(sid)
+        if not alignment:
+            continue
+        data = (section.get("visuals", {}) or {}).get("data", {}) or {}
+
+        if sid == "architecture":
+            modules = data.get("modules") or []
+            connections = data.get("connections") or []
+            module_times: dict[str, float] = {}
+            for m in modules:
+                label = m.get("label") or m.get("id") or ""
+                # Try the label first, then the file_path's final segment
+                fp = (m.get("file_path") or "").rsplit("/", 1)[-1]
+                t = find_phrase_time(alignment, label) or find_phrase_time(alignment, fp)
+                if t is not None:
+                    m["narration_start_seconds"] = round(t, 2)
+                    module_times[m.get("id") or ""] = t
+            # A connection lights up when its destination module is first
+            # mentioned — that's the moment the narration "draws the arrow."
+            for c in connections:
+                tgt = c.get("to")
+                if tgt in module_times:
+                    c["narration_start_seconds"] = round(module_times[tgt], 2)
+            logger.info(
+                "Sync architecture: %d/%d modules anchored to alignment data",
+                len(module_times), len(modules),
+            )
+
+        elif sid == "code_walkthrough":
+            highlights = data.get("highlights") or []
+            anchored = 0
+            for h in highlights:
+                code = (h.get("code") or "").strip()
+                annotation = h.get("annotation") or ""
+                # The code line itself is usually distinctive enough to find
+                # in the audio. Fall back to the annotation if not.
+                t = None
+                if len(code) >= 8:
+                    # Use the first 3-5 tokens as a search anchor — the whole
+                    # line is unlikely to be quoted verbatim in narration.
+                    snippet = " ".join(code.split()[:4])
+                    t = find_phrase_time(alignment, snippet)
+                if t is None and annotation:
+                    t = find_phrase_time(alignment, annotation.split()[0] if annotation else "")
+                if t is not None:
+                    h["narration_start_seconds"] = round(t, 2)
+                    anchored += 1
+            logger.info(
+                "Sync code_walkthrough: %d/%d highlights anchored to alignment data",
+                anchored, len(highlights),
+            )
+
+    return script
 
 
 def apply_actual_durations(
@@ -496,10 +627,13 @@ def _generate_elevenlabs(
     voice_id: str,
     model_id: str,
     max_attempts: int = 4,
-) -> None:
-    """Call ElevenLabs TTS with exponential-backoff retries on 429 (and 5xx).
-    Caller still gets HTTPStatusError on auth errors (4xx other than 429)
-    and on the final failed attempt."""
+) -> dict[str, Any] | None:
+    """Call ElevenLabs TTS with-timestamps so we capture word-level
+    alignment alongside the audio. Returns the `alignment` dict from the
+    response (or None if alignment couldn't be obtained). Caller still
+    gets HTTPStatusError on auth errors (4xx other than 429) and on the
+    final failed attempt."""
+    import base64
     import httpx
 
     # Force the English-only model regardless of what config says — the
@@ -513,7 +647,13 @@ def _generate_elevenlabs(
             model_id, effective_model,
         )
 
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    # `with-timestamps` returns JSON with base64 audio + per-character
+    # timing. Used to sync architecture-module reveals + code-line
+    # highlights to the actual moment each name is spoken. Falls back to
+    # the plain endpoint if the timestamps variant errors (older API
+    # versions, restricted plans).
+    url_ts = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/with-timestamps"
+    url_plain = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
     body = {
         "text": text,
         "model_id": effective_model,
@@ -530,18 +670,54 @@ def _generate_elevenlabs(
     while True:
         attempt += 1
         response = httpx.post(
-            url,
+            url_ts,
             headers={
                 "xi-api-key": api_key,
                 "Content-Type": "application/json",
-                "Accept": "audio/mpeg",
+                "Accept": "application/json",
             },
             json=body,
             timeout=60,
         )
         if response.status_code < 400:
-            out_path.write_bytes(response.content)
-            return
+            payload = response.json()
+            audio_b64 = payload.get("audio_base64") or ""
+            if audio_b64:
+                out_path.write_bytes(base64.b64decode(audio_b64))
+                # Prefer normalized_alignment when present — it accounts for
+                # our `<break>` preprocessing (SSML tags removed from the
+                # character stream so timings line up with spoken phonemes).
+                alignment = (
+                    payload.get("normalized_alignment")
+                    or payload.get("alignment")
+                )
+                return alignment if isinstance(alignment, dict) else None
+            # No audio in JSON — unexpected. Fall through to retry logic.
+            logger.warning(
+                "ElevenLabs with-timestamps returned 200 but no audio_base64"
+            )
+
+        # If the with-timestamps endpoint specifically fails 400/404 (older
+        # plans / regional restrictions), retry once against the plain
+        # endpoint so we still get audio without alignment.
+        if response.status_code in (400, 404):
+            logger.warning(
+                "with-timestamps unavailable (HTTP %d) — falling back to plain endpoint",
+                response.status_code,
+            )
+            plain = httpx.post(
+                url_plain,
+                headers={
+                    "xi-api-key": api_key,
+                    "Content-Type": "application/json",
+                    "Accept": "audio/mpeg",
+                },
+                json=body,
+                timeout=60,
+            )
+            plain.raise_for_status()
+            out_path.write_bytes(plain.content)
+            return None
 
         retryable = response.status_code == 429 or response.status_code >= 500
         if not retryable or attempt >= max_attempts:

@@ -146,6 +146,11 @@ def generate_video(self, job_id: str, repo_url: str, options: dict[str, Any]) ->
         SCENE_TRAILING_BUFFER_S = 1.0
         SCENE_TRANSITION_S = 0.3
         voice_generator.apply_actual_durations(script, audio_files)
+        # Anchor each architecture module + each code highlight to the
+        # actual moment its name is spoken (via ElevenLabs character-
+        # level alignment). The script_generator's narration_start_seconds
+        # are guesses; this overwrites them with truth.
+        voice_generator.sync_visuals_to_alignment(script, audio_files)
         for section in script.get("sections", []):
             sid = section.get("id", "<unknown>")
             estimated = float(section.get("duration_seconds") or 0)
