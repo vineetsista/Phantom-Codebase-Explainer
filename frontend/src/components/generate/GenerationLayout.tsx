@@ -87,7 +87,7 @@ export function GenerationLayout({
             disabled={loading}
             className="inline-flex h-16 items-center justify-center gap-3 rounded-full bg-electric px-8 text-base font-semibold text-ink transition-all duration-300 ease-luxe hover:brightness-110 hover:shadow-[0_0_40px_-4px_rgba(0,240,255,0.7)] disabled:opacity-50"
           >
-            {loading ? "Starting" : "Generate"} <ArrowRight className="h-4 w-4" />
+            {loading ? "Starting" : "Generate explainer"} <ArrowRight className="h-4 w-4" />
           </button>
         </form>
 

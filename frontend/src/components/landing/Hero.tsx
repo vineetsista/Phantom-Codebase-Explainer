@@ -114,7 +114,7 @@ export function Hero() {
               disabled={loading}
               className="group inline-flex h-16 items-center justify-center gap-3 rounded-full bg-electric px-8 text-base font-semibold text-ink transition-all duration-300 ease-luxe hover:brightness-110 hover:shadow-[0_0_40px_-4px_rgba(0,240,255,0.7)] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <span>{loading ? "Starting" : "Generate"}</span>
+              <span>{loading ? "Starting" : "Generate explainer"}</span>
               <span
                 aria-hidden
                 className="inline-block transition-transform duration-300 ease-luxe group-hover:translate-x-1"

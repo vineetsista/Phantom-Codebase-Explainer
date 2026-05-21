@@ -77,7 +77,7 @@ export function FinalCTA() {
           disabled={loading}
           className="inline-flex h-16 items-center justify-center gap-3 rounded-full bg-electric px-8 text-base font-semibold text-ink transition-all duration-300 ease-luxe hover:brightness-110 hover:shadow-[0_0_40px_-4px_rgba(0,240,255,0.7)] disabled:opacity-50"
         >
-          {loading ? "Starting" : "Generate"} →
+          {loading ? "Starting" : "Generate explainer"} →
         </button>
       </motion.form>
 
