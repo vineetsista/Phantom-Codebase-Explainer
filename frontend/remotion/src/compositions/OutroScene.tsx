@@ -118,7 +118,16 @@ export const OutroScene: React.FC<{
       >
         <div
           style={{
-            opacity: headerSpring,
+            // Header fades out alongside the cards as the brand mark
+            // emerges. Same fold window.
+            opacity:
+              headerSpring *
+              interpolate(
+                frame,
+                [Math.max(beat2Start, haloStart - 30), haloStart],
+                [1, 0],
+                { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+              ),
             transform: `translateY(${interpolate(headerSpring, [0, 1], [30, 0])}px)`,
             fontSize: 22,
             letterSpacing: 6,
@@ -141,15 +150,35 @@ export const OutroScene: React.FC<{
               fps,
               config: SETTLE,
             });
-            const opacity = interpolate(enterSpring, [0, 1], [0, 1]);
+            // Cards-fold-to-brand transition: as Beat 3 (halo + wordmark)
+            // begins, every takeaway card collapses toward the screen
+            // centre, scaling from 1.0 → 0 with a slight inward Z translate.
+            // The visual reads as the takeaways "becoming" the brand mark.
+            // Animation runs across the 30 frames leading up to haloStart.
+            const foldStart = Math.max(beat2Start, haloStart - 30);
+            const foldProgress = interpolate(
+              frame,
+              [foldStart, haloStart],
+              [0, 1],
+              { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+            );
+            const foldScale = interpolate(foldProgress, [0, 1], [1, 0.05]);
+            const foldOpacity = interpolate(foldProgress, [0, 0.6, 1], [1, 0.5, 0]);
+            // Each card also rotates slightly as it folds — different
+            // direction per card so the converging effect reads as motion,
+            // not a uniform shrink.
+            const foldRotate = (index % 2 === 0 ? 1 : -1) * 8 * foldProgress;
+
+            const baseOpacity = interpolate(enterSpring, [0, 1], [0, 1]);
+            const opacity = baseOpacity * foldOpacity;
             const slideX = interpolate(enterSpring, [0, 1], [-60, 0]);
-            const rotateZ = interpolate(enterSpring, [0, 1], [-5, 0]);
+            const rotateZ = interpolate(enterSpring, [0, 1], [-5, 0]) + foldRotate;
             return (
               <div
                 key={item}
                 style={{
                   opacity,
-                  transform: `translateX(${slideX}px) rotate(${rotateZ}deg)`,
+                  transform: `translateX(${slideX}px) rotate(${rotateZ}deg) scale(${foldScale})`,
                   transformOrigin: "left center",
                   display: "flex",
                   alignItems: "center",
