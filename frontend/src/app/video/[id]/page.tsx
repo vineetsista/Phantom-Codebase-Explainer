@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { useToast } from "@/components/shared/Toaster";
 import { EmbedModal } from "@/components/video/EmbedModal";
 import { ShareModal } from "@/components/video/ShareModal";
 import { VideoPlayer, type Chapter } from "@/components/video/VideoPlayer";
@@ -19,7 +20,7 @@ export default function VideoPage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [embedOpen, setEmbedOpen] = useState(false);
   const [regenLoading, setRegenLoading] = useState(false);
-  const [regenError, setRegenError] = useState<string | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!params.id) return;
@@ -124,15 +125,16 @@ export default function VideoPage() {
               disabled={regenLoading}
               onClick={async () => {
                 setRegenLoading(true);
-                setRegenError(null);
                 try {
                   const { job_id } = await startGeneration(video.repo_url);
+                  toast.success("New job queued", "Heading to the live pipeline…");
                   router.push(
                     `/generate?job=${job_id}&url=${encodeURIComponent(video.repo_url)}`,
                   );
                 } catch (err) {
-                  setRegenError(
-                    err instanceof Error ? err.message : "Failed to queue regeneration",
+                  toast.error(
+                    "Couldn't queue regeneration",
+                    err instanceof Error ? err.message : undefined,
                   );
                   setRegenLoading(false);
                 }
@@ -146,10 +148,6 @@ export default function VideoPage() {
             </button>
           </div>
         </div>
-        {regenError && (
-          <p className="mt-3 text-right text-xs text-error">{regenError}</p>
-        )}
-
         {/* Below the fold */}
         <div className="mt-16 grid gap-6 md:grid-cols-[1fr_320px]">
           {/* Chapters */}

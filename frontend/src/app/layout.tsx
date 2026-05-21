@@ -2,11 +2,13 @@ import type { Metadata, Viewport } from "next";
 
 import { Footer } from "@/components/layout/Footer";
 import { Navbar } from "@/components/layout/Navbar";
+import { CommandPalette } from "@/components/shared/CommandPalette";
 import { CursorFollower } from "@/components/shared/CursorFollower";
 import { ExitIntentPopup } from "@/components/shared/ExitIntentPopup";
 import { GrainOverlay } from "@/components/shared/GrainOverlay";
 import { JsonLd } from "@/components/shared/JsonLd";
 import { PageTransition } from "@/components/shared/PageTransition";
+import { ToasterProvider } from "@/components/shared/Toaster";
 import "@/styles/globals.css";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
@@ -107,14 +109,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="min-h-screen bg-void font-body text-bone antialiased">
-        <GrainOverlay />
-        <CursorFollower />
-        <Navbar />
-        <main className="relative">
-          <PageTransition>{children}</PageTransition>
-        </main>
-        <Footer />
-        <ExitIntentPopup />
+        <ToasterProvider>
+          <GrainOverlay />
+          <CursorFollower />
+          <Navbar />
+          <main className="relative">
+            <PageTransition>{children}</PageTransition>
+          </main>
+          <Footer />
+          <ExitIntentPopup />
+          <CommandPalette />
+        </ToasterProvider>
       </body>
     </html>
   );

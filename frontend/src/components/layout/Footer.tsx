@@ -18,6 +18,7 @@ const columns: { title: string; links: FooterLink[] }[] = [
       { href: "/#how", label: "Features" },
       { href: "/#pricing", label: "Pricing" },
       { href: "/showcase", label: "Showcase" },
+      { href: "/use-cases", label: "Use cases" },
       { href: "/generate", label: "Generate" },
     ],
   },
@@ -29,9 +30,9 @@ const columns: { title: string; links: FooterLink[] }[] = [
         label: "GitHub",
         external: true,
       },
+      { href: "/status", label: "Status" },
       { label: "Docs · coming soon" },
       { label: "Changelog · coming soon" },
-      { label: "Examples · coming soon" },
     ],
   },
   {
