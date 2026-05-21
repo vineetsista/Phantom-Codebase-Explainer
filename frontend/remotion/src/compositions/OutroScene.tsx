@@ -25,16 +25,23 @@ export const OutroScene: React.FC<{
   const { fps } = useVideoConfig();
   const items = takeaways.length ? takeaways : ((section.visuals?.data as { takeaways?: string[] })?.takeaways ?? []);
 
-  // Scene plan: three beats inside the same allocated frame budget.
-  //   Beat 1: "Why this matters" frame                ~0   → 30%
-  //   Beat 2: KEY TAKEAWAYS list                      ~30% → 88%
-  //   Beat 3: sonar-ping brand finale                 ~88% → end
-  const totalFrames = Math.round(
-    ((section.audio_duration_seconds ?? section.duration_seconds ?? 12) + 1.0) * 30,
-  );
-  const beat1End = Math.round(totalFrames * 0.30);
+  // Scene plan: three beats keyed to actual audio length so there's
+  // never more than ~0.5s of silent brand-hold at the end.
+  //   Beat 1: "Why this matters" frame   ~0   → 28% of audio
+  //   Beat 2: KEY TAKEAWAYS list         ~28% → audio-end - 1s
+  //   Beat 3: sonar-ping brand finale    starts 1s BEFORE audio ends
+  //           so the brand is fully landed when narration finishes.
+  const audioDurSec =
+    section.audio_duration_seconds ?? section.duration_seconds ?? 12;
+  const audioEndFrames = Math.round(audioDurSec * 30);
+  // Total scene budget: audio + 0.5s tail. Previous 1.0s was producing
+  // perceptible dead time at the end of the video.
+  const totalFrames = audioEndFrames + 15;
+  const beat1End = Math.round(audioEndFrames * 0.28);
   const beat2Start = beat1End - 12;       // 12-frame crossfade overlap
-  const haloStart = Math.max(0, totalFrames - 60);
+  // Halo finale starts 1s before audio ends — brand crossfades in during
+  // the last beat of narration, ends with audio.
+  const haloStart = Math.max(beat2Start + 18, audioEndFrames - 30);
 
   const why = (whyItMatters || "").trim();
   // First beat fades in fast (matches the scene-frame crossfade) so a user

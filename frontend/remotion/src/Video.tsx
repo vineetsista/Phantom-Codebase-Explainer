@@ -48,12 +48,19 @@ function renderScene(
 
 /** Resolve a single scene's allocated frame count.
  * Uses the real audio duration when present (set by the worker after ffprobe),
- * with a 0.6 s trailing buffer so the last word of narration finishes before
- * the cut. Sequences with audio less than a hard minimum (2 s) are padded up
- * to that minimum so a stub render still has visible frames. */
+ * with a 1.0 s trailing buffer for most scenes so the last word of narration
+ * completes before the cut.
+ *
+ * The SUMMARY scene gets a tighter 0.5 s buffer because it's the last scene
+ * — there's no crossfade into a following scene to absorb the trailing silence,
+ * so a full 1 s buffer reads as dead time at the very end of the video. The
+ * sonar-ping brand finale inside OutroScene already starts 1 s before the
+ * audio ends, so 0.5 s of tail is enough.
+ */
 function sceneFrames(section: ScriptSection): number {
+  const trailingBuffer = section.id === "summary" ? 0.5 : SCENE_TRAILING_BUFFER_S;
   const seconds = (section.audio_duration_seconds ?? section.duration_seconds ?? 10)
-    + SCENE_TRAILING_BUFFER_S;
+    + trailingBuffer;
   return Math.max(FPS * 2, Math.round(seconds * FPS));
 }
 

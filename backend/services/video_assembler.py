@@ -44,6 +44,15 @@ _CHAPTER_TITLES = {
 }
 
 
+def _scene_buffer(sid: str, default_buffer: float) -> float:
+    """Per-scene trailing buffer. Summary gets a tighter 0.5s because
+    it's the last scene — no crossfade absorbs its trailing silence,
+    and the brand finale inside OutroScene already starts 1s before
+    audio ends. Match the override in frontend/remotion/src/Video.tsx
+    so chapter math + Remotion placement agree."""
+    return 0.5 if sid == "summary" else default_buffer
+
+
 def compute_chapters(
     sections: list[dict[str, Any]],
     buffer_s: float = SCENE_TRAILING_BUFFER_S,
@@ -62,7 +71,7 @@ def compute_chapters(
     for i, section in enumerate(sections):
         sid = section.get("id", "section")
         audio = section.get("audio_duration_seconds") or section.get("duration_seconds") or 10
-        scene_duration = float(audio) + buffer_s
+        scene_duration = float(audio) + _scene_buffer(sid, buffer_s)
         # `cursor` is where this scene's <Sequence> begins (its `from`).
         # The scene fades in over `transition_s` so its content isn't
         # dominant until cursor + transition_s. Offset every non-zero
@@ -192,7 +201,7 @@ def assemble(
     sections = script.get("sections", [])
     scene_durations = [
         float(s.get("audio_duration_seconds") or s.get("duration_seconds") or 10)
-        + SCENE_TRAILING_BUFFER_S
+        + _scene_buffer(s.get("id") or "", SCENE_TRAILING_BUFFER_S)
         for s in sections
     ]
     transitions = max(0, len(sections) - 1)
