@@ -12,7 +12,16 @@
       "Bash(python scripts/build-onepager.py)",
       "Bash(python scripts/build-lead-magnet.py)",
       "Bash(python -c \"import json; json.load\\(open\\('frontend/vercel.json'\\)\\); print\\('vercel.json OK'\\)\")",
-      "Bash(where ffmpeg *)"
+      "Bash(where ffmpeg *)",
+      "Bash(docker --version)",
+      "Bash(docker-compose --version)",
+      "Bash(docker-compose up *)",
+      "Bash(curl *)",
+      "Bash(docker exec phantom-worker-1 *)",
+      "Bash(docker-compose build *)",
+      "Bash(docker-compose restart *)",
+      "Bash(grep -oE \"ELEVENLABS_API_KEY=.{0,10}\")",
+      "Bash(docker stats *)"
     ]
   }
 }
