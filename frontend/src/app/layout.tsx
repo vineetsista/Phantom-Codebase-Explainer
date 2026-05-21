@@ -5,8 +5,11 @@ import { Navbar } from "@/components/layout/Navbar";
 import { CursorFollower } from "@/components/shared/CursorFollower";
 import { ExitIntentPopup } from "@/components/shared/ExitIntentPopup";
 import { GrainOverlay } from "@/components/shared/GrainOverlay";
+import { JsonLd } from "@/components/shared/JsonLd";
 import { PageTransition } from "@/components/shared/PageTransition";
 import "@/styles/globals.css";
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"),
@@ -61,6 +64,48 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        <JsonLd
+          data={[
+            {
+              "@context": "https://schema.org",
+              "@type": "Organization",
+              name: "Phantom",
+              url: APP_URL,
+              logo: `${APP_URL}/favicon.svg`,
+              description:
+                "AI that turns any GitHub repository into a narrated video explainer.",
+              founder: { "@type": "Person", name: "Vineet Sista" },
+              sameAs: ["https://twitter.com/usephantom"],
+            },
+            {
+              "@context": "https://schema.org",
+              "@type": "WebSite",
+              name: "Phantom",
+              url: APP_URL,
+              potentialAction: {
+                "@type": "SearchAction",
+                target: `${APP_URL}/showcase?q={search_term_string}`,
+                "query-input": "required name=search_term_string",
+              },
+            },
+            {
+              "@context": "https://schema.org",
+              "@type": "SoftwareApplication",
+              name: "Phantom RepoX",
+              applicationCategory: "DeveloperApplication",
+              operatingSystem: "Web",
+              offers: [
+                { "@type": "Offer", name: "Hobby", price: "0", priceCurrency: "USD" },
+                { "@type": "Offer", name: "Pro", price: "19", priceCurrency: "USD" },
+                { "@type": "Offer", name: "Studio", price: "49", priceCurrency: "USD" },
+              ],
+              description:
+                "AI-generated narrated video walkthroughs of any GitHub repository.",
+            },
+          ]}
+        />
+      </head>
       <body className="min-h-screen bg-void font-body text-bone antialiased">
         <GrainOverlay />
         <CursorFollower />
