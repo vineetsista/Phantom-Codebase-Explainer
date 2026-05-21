@@ -47,7 +47,17 @@ export interface VideoRecord {
   script_data?: {
     title?: string;
     hook?: string;
-    sections?: { id: string; narration: string; duration_seconds: number }[];
+    sections?: {
+      id: string;
+      narration: string;
+      duration_seconds: number;
+      audio_duration_seconds?: number;
+    }[];
+    /** Canonical chapter list computed by video_assembler.compute_chapters.
+     *  Frontend prefers this over its local math — it's the same math as the
+     *  Remotion Sequence placement, computed exactly once at render time. */
+    chapters?: { id: string; title: string; start_seconds: number }[];
+    why_it_matters?: string;
     key_takeaways?: string[];
   } | null;
   analysis_data?: Record<string, unknown> | null;

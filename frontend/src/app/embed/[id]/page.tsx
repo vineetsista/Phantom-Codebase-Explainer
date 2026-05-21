@@ -56,13 +56,21 @@ export default function EmbedPage() {
     );
   }
 
-  const chapters: Chapter[] = sectionStartTimes(
-    video.script_data?.sections ?? [],
-  ).map(({ id, startSeconds }) => ({
-    id,
-    start: startSeconds,
-    label: humanizeSection(id),
-  }));
+  // Prefer backend-computed chapters (canonical timing source). Fall back to
+  // client-side math for legacy rows.
+  const chapters: Chapter[] = (video.script_data?.chapters?.length
+    ? video.script_data.chapters.map((c) => ({
+        id: c.id,
+        start: c.start_seconds,
+        label: c.title || humanizeSection(c.id),
+      }))
+    : sectionStartTimes(video.script_data?.sections ?? []).map(
+        ({ id, startSeconds }) => ({
+          id,
+          start: startSeconds,
+          label: humanizeSection(id),
+        }),
+      ));
 
   return (
     <div className="relative min-h-screen bg-void p-2 md:p-4">

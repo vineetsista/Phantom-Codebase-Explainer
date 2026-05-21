@@ -25,6 +25,54 @@ logger = logging.getLogger(__name__)
 
 MUSIC_REL_PATH = "music/ambient.mp3"
 
+# Render-pipeline constants. The same values live in three places — this
+# file, backend/workers/tasks.py, and frontend/remotion/src/types.ts. Keep
+# them in lockstep; a 25-second chapter drift shipped exactly because they
+# disagreed.
+SCENE_TRAILING_BUFFER_S = 1.0
+SCENE_TRANSITION_S = 0.3
+
+
+_CHAPTER_TITLES = {
+    "intro": "Intro",
+    "architecture": "Architecture",
+    "code_walkthrough": "Code walkthrough",
+    "data_flow": "Data flow",
+    "file_tree": "File tree",
+    "why_it_matters": "Why this matters",
+    "summary": "Summary",
+}
+
+
+def compute_chapters(
+    sections: list[dict[str, Any]],
+    buffer_s: float = SCENE_TRAILING_BUFFER_S,
+    transition_s: float = SCENE_TRANSITION_S,
+) -> list[dict[str, Any]]:
+    """Canonical chapter timestamps. Identical math to PhantomVideo's
+    Sequence-placement loop: cursor advances by (sceneDuration − transition)
+    per section. Drives both the database/frontend chapter list AND the
+    Remotion Sequence `from` values — exactly ONE source of truth so
+    drift becomes impossible.
+
+    Returns a list of `{id, title, start_seconds}` dicts.
+    """
+    chapters: list[dict[str, Any]] = []
+    cursor = 0.0
+    for section in sections:
+        sid = section.get("id", "section")
+        audio = section.get("audio_duration_seconds") or section.get("duration_seconds") or 10
+        scene_duration = float(audio) + buffer_s
+        chapters.append(
+            {
+                "id": sid,
+                "title": _CHAPTER_TITLES.get(sid, sid.replace("_", " ").title()),
+                "start_seconds": round(cursor, 3),
+            }
+        )
+        cursor += scene_duration - transition_s
+    return chapters
+
 
 def _detect_music_src(remotion_project_dir: str) -> str | None:
     """If the brand ambient bed exists under the shared frontend public/ folder
@@ -98,6 +146,18 @@ def assemble(
 
     abs_diagram = str(Path(diagram_svg_path).resolve()) if diagram_svg_path else ""
 
+    # Canonical chapter timestamps — same math as PhantomVideo's Sequence
+    # placement, computed exactly once, stored on the script dict so the
+    # database row + frontend player + Remotion composition all read from
+    # one source. Drift between estimate-based and audio-based timing was
+    # the 17-second chapter-marker bug from the previous pass.
+    script["chapters"] = compute_chapters(script.get("sections", []))
+    logger.info(
+        "assemble job=%s chapters=%s",
+        job_id,
+        [(c["id"], c["start_seconds"]) for c in script["chapters"]],
+    )
+
     props_path = Path(settings.temp_dir) / job_id / "composition-props.json"
     props_path.parent.mkdir(parents=True, exist_ok=True)
     props_path.write_text(
@@ -121,9 +181,8 @@ def assemble(
     # trailing buffer so the narration's last word completes before the cut,
     # minus the per-transition crossfade overlap. Falls back to the
     # estimated duration_seconds when audio_duration_seconds isn't set
-    # (e.g. preview renders without props).
-    SCENE_TRAILING_BUFFER_S = 1.0
-    SCENE_TRANSITION_S = 0.3
+    # (e.g. preview renders without props). Constants live at module top —
+    # see compute_chapters() for the matching consumer.
     sections = script.get("sections", [])
     scene_durations = [
         float(s.get("audio_duration_seconds") or s.get("duration_seconds") or 10)

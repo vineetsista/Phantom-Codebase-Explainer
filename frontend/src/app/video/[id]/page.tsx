@@ -32,11 +32,21 @@ export default function VideoPage() {
   }, [params.id]);
 
   const chapters: Chapter[] = useMemo(() => {
-    if (!video?.script_data?.sections) return [];
-    // sectionStartTimes mirrors the Remotion Sequence placement math exactly
-    // (audio_duration + 1.0s buffer per scene, − 0.3s per scene-to-scene
-    // crossfade). The previous chapter logic used the pre-voice estimate
-    // and was off by ~25-30s per chapter once Problem 1 landed.
+    if (!video?.script_data) return [];
+    // Prefer the canonical chapter list written by the backend
+    // (video_assembler.compute_chapters). That's the same math the
+    // Remotion Sequences use — drift becomes impossible. Only fall back
+    // to the client-side math for legacy DB rows generated before the
+    // backend-side chapter writer landed.
+    const fromBackend = video.script_data.chapters;
+    if (fromBackend && fromBackend.length) {
+      return fromBackend.map((c) => ({
+        id: c.id,
+        start: c.start_seconds,
+        label: c.title || humanizeSection(c.id),
+      }));
+    }
+    if (!video.script_data.sections) return [];
     return sectionStartTimes(video.script_data.sections).map(({ id, startSeconds }) => ({
       id,
       start: startSeconds,
