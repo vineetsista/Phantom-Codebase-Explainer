@@ -8,6 +8,7 @@ import {
 
 import { BackgroundGrid } from "../components/BackgroundGrid";
 import { Watermark } from "../components/Watermark";
+import { FONT_BODY, FONT_DISPLAY, FONT_MONO } from "../loadFonts";
 import { COLORS, type ScriptSection } from "../types";
 
 interface FileSummary {
@@ -33,11 +34,12 @@ export const CodeWalkthroughScene: React.FC<{ section: ScriptSection }> = ({ sec
           left: 0,
           right: 0,
           textAlign: "center",
-          fontFamily: "Inter, system-ui, sans-serif",
+          fontFamily: FONT_DISPLAY,
         }}
       >
         <div
           style={{
+            fontFamily: FONT_MONO,
             fontSize: 22,
             letterSpacing: 6,
             textTransform: "uppercase",
@@ -113,7 +115,7 @@ export const CodeWalkthroughScene: React.FC<{ section: ScriptSection }> = ({ sec
                     borderRadius: 999,
                     border: `1px solid ${COLORS.cyan}55`,
                     background: `${COLORS.cyan}10`,
-                    fontFamily: "Inter, system-ui, sans-serif",
+                    fontFamily: FONT_BODY,
                   }}
                 >
                   {file.language}

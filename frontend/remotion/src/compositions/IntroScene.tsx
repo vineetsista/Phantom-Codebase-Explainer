@@ -12,6 +12,7 @@ import { BackgroundGrid } from "../components/BackgroundGrid";
 import { CodeRain } from "../components/CodeRain";
 import { LogoMark } from "../components/LogoMark";
 import { Watermark } from "../components/Watermark";
+import { FONT_BODY, FONT_DISPLAY, FONT_MONO } from "../loadFonts";
 import { COLORS, type ScriptSection } from "../types";
 
 export const IntroScene: React.FC<{ section: ScriptSection }> = ({ section }) => {
@@ -59,14 +60,14 @@ export const IntroScene: React.FC<{ section: ScriptSection }> = ({ section }) =>
           style={{
             opacity: kickerOpacity,
             marginTop: 36,
-            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            fontFamily: FONT_MONO,
             fontSize: 18,
             letterSpacing: 6,
             textTransform: "uppercase",
             color: COLORS.cyan,
           }}
         >
-          PHANTOM · CODEBASE EXPLAINER
+          PHANTOM · REPOX
         </div>
 
         <div
@@ -74,7 +75,7 @@ export const IntroScene: React.FC<{ section: ScriptSection }> = ({ section }) =>
             opacity: titleSpring,
             transform: `translateY(${titleY}px)`,
             marginTop: 32,
-            fontFamily: "Inter, system-ui, sans-serif",
+            fontFamily: FONT_DISPLAY,
             fontSize: 128,
             fontWeight: 800,
             letterSpacing: -2,
@@ -93,7 +94,7 @@ export const IntroScene: React.FC<{ section: ScriptSection }> = ({ section }) =>
             marginTop: 24,
             maxWidth: 1200,
             textAlign: "center",
-            fontFamily: "Inter, system-ui, sans-serif",
+            fontFamily: FONT_BODY,
             fontSize: 30,
             color: "rgba(245,245,240,0.7)",
             lineHeight: 1.3,
@@ -108,7 +109,7 @@ export const IntroScene: React.FC<{ section: ScriptSection }> = ({ section }) =>
             marginTop: 36,
             display: "flex",
             gap: 16,
-            fontFamily: "Inter, system-ui, sans-serif",
+            fontFamily: FONT_BODY,
             fontSize: 22,
             color: COLORS.text,
           }}

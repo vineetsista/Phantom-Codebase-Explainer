@@ -1,5 +1,6 @@
 import React from "react";
 
+import { FONT_MONO } from "../loadFonts";
 import { COLORS } from "../types";
 
 export const Watermark: React.FC = () => {
@@ -18,9 +19,10 @@ export const Watermark: React.FC = () => {
         background: "rgba(10,10,11,0.6)",
         backdropFilter: "blur(8px)",
         color: COLORS.text,
-        fontFamily: "Inter, system-ui, sans-serif",
-        fontSize: 14,
-        letterSpacing: 0.5,
+        fontFamily: FONT_MONO,
+        fontSize: 12,
+        letterSpacing: 3,
+        textTransform: "uppercase",
       }}
     >
       <span

@@ -11,7 +11,12 @@ import { ArchitectureScene } from "./compositions/ArchitectureScene";
 import { CodeWalkthroughScene } from "./compositions/CodeWalkthroughScene";
 import { IntroScene } from "./compositions/IntroScene";
 import { OutroScene } from "./compositions/OutroScene";
+import { loadFonts } from "./loadFonts";
 import { COLORS, FPS, type CompositionProps, type ScriptSection } from "./types";
+
+// Kick off font loading on module evaluation. delayRender() inside ensures the
+// renderer waits for the first paint until the FontFaces resolve (or fail).
+loadFonts();
 
 function renderScene(section: ScriptSection, takeaways: string[]) {
   switch (section.id) {

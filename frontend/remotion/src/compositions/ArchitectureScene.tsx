@@ -9,6 +9,7 @@ import {
 
 import { BackgroundGrid } from "../components/BackgroundGrid";
 import { Watermark } from "../components/Watermark";
+import { FONT_BODY, FONT_DISPLAY } from "../loadFonts";
 import { COLORS, type ScriptModule, type ScriptSection } from "../types";
 
 const BOX_COLORS = [
@@ -65,7 +66,7 @@ export const ArchitectureScene: React.FC<{ section: ScriptSection }> = ({ sectio
           left: 0,
           right: 0,
           textAlign: "center",
-          fontFamily: "Inter, system-ui, sans-serif",
+          fontFamily: FONT_DISPLAY,
         }}
       >
         <div
@@ -151,11 +152,13 @@ export const ArchitectureScene: React.FC<{ section: ScriptSection }> = ({ sectio
               background: "#111118",
               border: `1.5px solid ${color}`,
               boxShadow: `0 0 48px -16px ${color}, 0 0 0 1px rgba(255,255,255,0.04)`,
-              fontFamily: "Inter, system-ui, sans-serif",
+              fontFamily: FONT_BODY,
               color: COLORS.text,
             }}
           >
-            <div style={{ fontSize: 32, fontWeight: 700 }}>{module.name}</div>
+            <div style={{ fontFamily: FONT_DISPLAY, fontSize: 32, fontWeight: 700 }}>
+              {module.name}
+            </div>
             <div style={{ marginTop: 6, color, fontSize: 20 }}>{module.role}</div>
             <div
               style={{
