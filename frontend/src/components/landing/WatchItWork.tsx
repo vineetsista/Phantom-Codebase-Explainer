@@ -27,8 +27,16 @@ export function WatchItWork() {
           Watch it work.
         </h2>
         <p className="mx-auto mt-6 max-w-xl text-lg text-fog">
-          This three-minute video was generated automatically from the React.js
-          repo. No editing. No human input.
+          This two-minute video was generated automatically from{" "}
+          <a
+            href="https://github.com/sindresorhus/is-online"
+            target="_blank"
+            rel="noreferrer"
+            className="text-bone underline decoration-electric/40 underline-offset-4 transition-colors hover:text-electric"
+          >
+            sindresorhus/is-online
+          </a>
+          . No editing. No human input.
         </p>
       </div>
 
@@ -48,10 +56,9 @@ export function WatchItWork() {
           loop
           playsInline
           preload="metadata"
-          poster="/showcase/react-poster.jpg"
+          poster="/showcase/is-online-poster.jpg"
         >
-          {/* When you pre-generate showcase videos, drop them into /public/showcase/ */}
-          <source src="/showcase/react.mp4" type="video/mp4" />
+          <source src="/showcase/is-online-demo.mp4" type="video/mp4" />
         </video>
 
         {!hasPlayed && (
