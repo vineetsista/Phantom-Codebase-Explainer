@@ -1,7 +1,7 @@
 import React from "react";
 import { Composition } from "remotion";
 
-import { PhantomVideo } from "./Video";
+import { PhantomVideo, totalFrames } from "./Video";
 import { FPS, type CompositionProps, type VideoScript } from "./types";
 
 // A preview-only fallback script so `remotion preview` works without props.
@@ -101,28 +101,19 @@ const PREVIEW_PROPS: CompositionProps = {
 };
 
 export const RemotionRoot: React.FC = () => {
-  const totalSeconds = PREVIEW_SCRIPT.sections.reduce(
-    (sum, section) => sum + (section.duration_seconds || 10),
-    0,
-  );
-
   return (
     <>
       <Composition
         id="PhantomVideo"
         component={PhantomVideo}
-        durationInFrames={Math.max(FPS * 5, totalSeconds * FPS)}
+        durationInFrames={totalFrames(PREVIEW_SCRIPT)}
         fps={FPS}
         width={1920}
         height={1080}
         defaultProps={PREVIEW_PROPS}
-        calculateMetadata={({ props }) => {
-          const seconds = (props.script?.sections ?? []).reduce(
-            (sum, s) => sum + (s.duration_seconds || 10),
-            0,
-          );
-          return { durationInFrames: Math.max(FPS * 5, Math.round(seconds * FPS)) };
-        }}
+        calculateMetadata={({ props }) => ({
+          durationInFrames: totalFrames(props.script),
+        })}
       />
     </>
   );

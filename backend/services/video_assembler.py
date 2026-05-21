@@ -117,8 +117,31 @@ def assemble(
         job_id, props_path.resolve(), len(audio_for_props), public_audio_dir,
     )
 
-    duration = sum(int(s.get("duration_seconds") or 10) for s in script.get("sections", []))
-    logger.info("assemble job=%s total_duration_seconds=%d", job_id, duration)
+    # Total duration uses the REAL per-section audio length + a fixed
+    # trailing buffer so the narration's last word completes before the cut,
+    # minus the per-transition crossfade overlap. Falls back to the
+    # estimated duration_seconds when audio_duration_seconds isn't set
+    # (e.g. preview renders without props).
+    SCENE_TRAILING_BUFFER_S = 0.6
+    SCENE_TRANSITION_S = 0.3
+    sections = script.get("sections", [])
+    scene_durations = [
+        float(s.get("audio_duration_seconds") or s.get("duration_seconds") or 10)
+        + SCENE_TRAILING_BUFFER_S
+        for s in sections
+    ]
+    transitions = max(0, len(sections) - 1)
+    duration = max(
+        5,
+        int(round(sum(scene_durations) - transitions * SCENE_TRANSITION_S)),
+    )
+    logger.info(
+        "assemble job=%s sections=%d total_duration_seconds=%d "
+        "scene_durations=%s transitions=%d crossfade=%.2fs",
+        job_id, len(sections), duration,
+        [round(d, 2) for d in scene_durations],
+        transitions, SCENE_TRANSITION_S,
+    )
 
     used_remotion = False
     if _remotion_available(settings.remotion_project_dir):

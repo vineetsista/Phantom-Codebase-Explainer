@@ -16,7 +16,9 @@ Failure modes are explicit:
 from __future__ import annotations
 
 import logging
+import shutil
 import struct
+import subprocess
 import wave
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,52 @@ import httpx
 from config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def probe_duration(path: Path | str) -> float | None:
+    """Return the real duration of an audio file in seconds, or None if it
+    cannot be measured. Uses ffprobe; falls back to wave for our silent
+    placeholder WAVs (no ffmpeg dep at unit-test time)."""
+    path = Path(path)
+    if not path.is_file() or path.stat().st_size == 0:
+        return None
+    # Cheap WAV path — avoids spawning ffprobe for silent placeholders.
+    if path.suffix.lower() == ".wav":
+        try:
+            with wave.open(str(path), "rb") as wf:
+                frames = wf.getnframes()
+                rate = wf.getframerate() or 1
+                return frames / float(rate)
+        except (wave.Error, EOFError):
+            pass
+    if not shutil.which("ffprobe"):
+        return None
+    try:
+        proc = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "csv=p=0",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if proc.returncode != 0:
+            logger.warning(
+                "ffprobe failed for %s (exit=%d): %s",
+                path, proc.returncode, (proc.stderr or "").strip()[:300],
+            )
+            return None
+        value = (proc.stdout or "").strip()
+        if not value:
+            return None
+        return float(value)
+    except (subprocess.TimeoutExpired, ValueError) as exc:
+        logger.warning("ffprobe error for %s: %s", path, exc)
+        return None
 
 
 class TTSConfigError(RuntimeError):
@@ -210,12 +258,55 @@ def _segment(
     duration: int,
     provider: str,
 ) -> dict[str, Any]:
+    # Probe the file we just wrote. If ffprobe is unavailable or the file is
+    # the silent-WAV placeholder, fall back to the estimated duration.
+    probed = probe_duration(out_path)
+    actual = float(probed) if probed and probed > 0 else float(duration)
     return {
         "section_id": section_id,
         "audio_path": str(out_path),
+        # `duration_seconds` is the original (estimated) value for backwards
+        # compatibility with anything that already reads it.
         "duration_seconds": duration,
+        # `audio_duration_seconds` is the SOURCE OF TRUTH for downstream scene
+        # timing — millisecond-accurate via ffprobe.
+        "audio_duration_seconds": round(actual, 3),
         "provider": provider,
     }
+
+
+def apply_actual_durations(
+    script: dict[str, Any],
+    audio_files: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Mutate `script` in place so each section carries `audio_duration_seconds`
+    derived from the matching audio segment. Also drops sections whose
+    narration was empty (silent placeholder) so they don't appear as dead air
+    in the final video.
+
+    Returns the same script dict for convenience.
+    """
+    by_section = {a["section_id"]: a for a in audio_files}
+    kept: list[dict[str, Any]] = []
+    dropped: list[str] = []
+    for section in script.get("sections", []):
+        sid = section.get("id")
+        narration = (section.get("narration") or "").strip()
+        seg = by_section.get(sid)
+        if not narration or not seg:
+            dropped.append(sid or "<unknown>")
+            continue
+        audio_dur = seg.get("audio_duration_seconds") or seg.get("duration_seconds")
+        section["audio_duration_seconds"] = round(float(audio_dur or 0.0), 3)
+        kept.append(section)
+
+    if dropped:
+        logger.info(
+            "apply_actual_durations: dropped %d empty-narration sections: %s",
+            len(dropped), ", ".join(dropped),
+        )
+    script["sections"] = kept
+    return script
 
 
 def _generate_openai(text: str, out_path: Path, api_key: str) -> None:

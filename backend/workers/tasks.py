@@ -138,6 +138,34 @@ def generate_video(self, job_id: str, repo_url: str, options: dict[str, Any]) ->
             job_id, len(audio_files),
         )
 
+        # Replace each section's estimated duration with the real audio
+        # length (measured via ffprobe in voice_generator). Sections whose
+        # narration was empty are dropped here, not silently rendered as
+        # dead air. Per-section timing telemetry lands in the worker log so
+        # we can spot drift between estimate and actual.
+        SCENE_TRAILING_BUFFER_S = 0.6
+        SCENE_TRANSITION_S = 0.3
+        voice_generator.apply_actual_durations(script, audio_files)
+        for section in script.get("sections", []):
+            sid = section.get("id", "<unknown>")
+            estimated = float(section.get("duration_seconds") or 0)
+            actual = float(section.get("audio_duration_seconds") or 0)
+            scene_dur = round(actual + SCENE_TRAILING_BUFFER_S, 3)
+            logger.info(
+                "job=%s section=%s estimated=%.2fs actual=%.2fs "
+                "scene_duration=%.2fs transition_buffer=%.2fs",
+                job_id, sid, estimated, actual, scene_dur, SCENE_TRAILING_BUFFER_S,
+            )
+
+        # Persist the corrected script (now carrying audio_duration_seconds
+        # per section, empty sections removed) so the frontend chapter list
+        # and any future re-render uses the truth, not the estimate.
+        _update(
+            job_id,
+            details={"stage": "Voiceover complete", "sections": len(script.get("sections", []))},
+            script_data=script,
+        )
+
         # Stage 5 — assemble
         _update(
             job_id,
