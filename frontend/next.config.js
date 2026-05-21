@@ -2,7 +2,14 @@
 const nextConfig = {
   reactStrictMode: true,
   async rewrites() {
-    const api = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    // The Next.js server runs this server-side. In Docker, `localhost:8000`
+    // resolves to the frontend container itself — we need the backend service
+    // name. API_PROXY_TARGET overrides for that case; fall back to the public
+    // API URL for local dev.
+    const api =
+      process.env.API_PROXY_TARGET ||
+      process.env.NEXT_PUBLIC_API_URL ||
+      "http://localhost:8000";
     return [
       // Proxy /media/* (generated MP4s + thumbnails) through Next so the
       // browser uses same-origin URLs and avoids CORS friction.

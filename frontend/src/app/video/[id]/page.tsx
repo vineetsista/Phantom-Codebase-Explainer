@@ -1,20 +1,25 @@
 "use client";
 
-import { Download, ExternalLink, RefreshCw, Share2, Sparkles, Star } from "lucide-react";
+import { Code2, Download, ExternalLink, RefreshCw, Share2, Sparkles, Star } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { EmbedModal } from "@/components/video/EmbedModal";
 import { ShareModal } from "@/components/video/ShareModal";
 import { VideoPlayer, type Chapter } from "@/components/video/VideoPlayer";
-import { getVideo, type VideoRecord } from "@/lib/api";
+import { getVideo, startGeneration, type VideoRecord } from "@/lib/api";
 import { formatDuration } from "@/lib/utils";
 
 export default function VideoPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const [video, setVideo] = useState<VideoRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  const [embedOpen, setEmbedOpen] = useState(false);
+  const [regenLoading, setRegenLoading] = useState(false);
+  const [regenError, setRegenError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!params.id) return;
@@ -94,8 +99,15 @@ export default function VideoPage() {
             <button type="button" onClick={() => setShareOpen(true)} className={TOOLBAR_BTN}>
               <Share2 className="h-4 w-4" /> Share
             </button>
+            <button type="button" onClick={() => setEmbedOpen(true)} className={TOOLBAR_BTN}>
+              <Code2 className="h-4 w-4" /> Embed
+            </button>
             {video.video_url && (
-              <a href={video.video_url} download className={TOOLBAR_BTN}>
+              <a
+                href={video.video_url}
+                download={`${video.repo_owner}-${video.repo_name}.mp4`}
+                className={TOOLBAR_BTN}
+              >
                 <Download className="h-4 w-4" /> Download
               </a>
             )}
@@ -107,14 +119,36 @@ export default function VideoPage() {
             >
               <ExternalLink className="h-4 w-4" /> Repo
             </a>
-            <Link
-              href={`/generate?url=${encodeURIComponent(video.repo_url)}`}
+            <button
+              type="button"
+              disabled={regenLoading}
+              onClick={async () => {
+                setRegenLoading(true);
+                setRegenError(null);
+                try {
+                  const { job_id } = await startGeneration(video.repo_url);
+                  router.push(
+                    `/generate?job=${job_id}&url=${encodeURIComponent(video.repo_url)}`,
+                  );
+                } catch (err) {
+                  setRegenError(
+                    err instanceof Error ? err.message : "Failed to queue regeneration",
+                  );
+                  setRegenLoading(false);
+                }
+              }}
               className={TOOLBAR_BTN}
             >
-              <RefreshCw className="h-4 w-4" /> Regenerate
-            </Link>
+              <RefreshCw
+                className={`h-4 w-4 ${regenLoading ? "animate-spin" : ""}`}
+              />{" "}
+              {regenLoading ? "Queueing…" : "Regenerate"}
+            </button>
           </div>
         </div>
+        {regenError && (
+          <p className="mt-3 text-right text-xs text-error">{regenError}</p>
+        )}
 
         {/* Below the fold */}
         <div className="mt-16 grid gap-6 md:grid-cols-[1fr_320px]">
@@ -154,6 +188,7 @@ export default function VideoPage() {
       </section>
 
       <ShareModal open={shareOpen} onClose={() => setShareOpen(false)} video={video} />
+      <EmbedModal open={embedOpen} onClose={() => setEmbedOpen(false)} video={video} />
     </>
   );
 }

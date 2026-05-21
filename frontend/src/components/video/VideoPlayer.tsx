@@ -44,6 +44,7 @@ export function VideoPlayer({ src, poster, chapters = [], className }: VideoPlay
   const [fullscreen, setFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [playError, setPlayError] = useState<string | null>(null);
 
   // Track ready state so we don't render numbers from a half-loaded video.
   const ready = duration > 0;
@@ -53,7 +54,16 @@ export function VideoPlayer({ src, poster, chapters = [], className }: VideoPlay
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
-      void video.play();
+      const result = video.play();
+      if (result && typeof result.then === "function") {
+        result.catch((err: unknown) => {
+          // Surface the failure instead of swallowing it. Autoplay rejections
+          // and decoder errors both land here.
+          const message = err instanceof Error ? err.message : String(err);
+          console.error("VideoPlayer: play() rejected", err);
+          setPlayError(message);
+        });
+      }
     } else {
       video.pause();
     }
@@ -96,7 +106,10 @@ export function VideoPlayer({ src, poster, chapters = [], className }: VideoPlay
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    const onPlay = () => setPlaying(true);
+    const onPlay = () => {
+      setPlaying(true);
+      setPlayError(null);
+    };
     const onPause = () => setPlaying(false);
     const onTime = () => setTime(video.currentTime);
     const onMeta = () => setDuration(video.duration || 0);
@@ -108,12 +121,27 @@ export function VideoPlayer({ src, poster, chapters = [], className }: VideoPlay
       setVolume(video.volume);
       setMuted(video.muted);
     };
+    const onError = () => {
+      const code = video.error?.code;
+      // MediaError codes: 1=ABORTED, 2=NETWORK, 3=DECODE, 4=SRC_NOT_SUPPORTED
+      const reason =
+        code === 4
+          ? "Video source could not be loaded (check that /media/ proxy reaches the backend)"
+          : code === 2
+            ? "Network error loading video"
+            : code === 3
+              ? "Video could not be decoded"
+              : "Video failed to load";
+      console.error("VideoPlayer: <video> error", { code, src: video.currentSrc });
+      setPlayError(reason);
+    };
     video.addEventListener("play", onPlay);
     video.addEventListener("pause", onPause);
     video.addEventListener("timeupdate", onTime);
     video.addEventListener("loadedmetadata", onMeta);
     video.addEventListener("progress", onProgress);
     video.addEventListener("volumechange", onVol);
+    video.addEventListener("error", onError);
     return () => {
       video.removeEventListener("play", onPlay);
       video.removeEventListener("pause", onPause);
@@ -121,6 +149,7 @@ export function VideoPlayer({ src, poster, chapters = [], className }: VideoPlay
       video.removeEventListener("loadedmetadata", onMeta);
       video.removeEventListener("progress", onProgress);
       video.removeEventListener("volumechange", onVol);
+      video.removeEventListener("error", onError);
     };
   }, [src]);
 
@@ -208,7 +237,7 @@ export function VideoPlayer({ src, poster, chapters = [], className }: VideoPlay
       />
 
       {/* Center play button overlay (only while paused) */}
-      {!playing && (
+      {!playing && !playError && (
         <button
           type="button"
           aria-label="Play"
@@ -219,6 +248,27 @@ export function VideoPlayer({ src, poster, chapters = [], className }: VideoPlay
             <Play className="h-8 w-8 fill-electric text-electric" />
           </span>
         </button>
+      )}
+
+      {/* Visible error overlay — replaces the silent failure mode where the
+          play button did nothing because the source failed to load. */}
+      {playError && (
+        <div className="absolute inset-0 grid place-items-center bg-ink/85 px-6 backdrop-blur">
+          <div className="max-w-md text-center">
+            <div className="kicker text-error">Playback error</div>
+            <p className="mt-3 text-sm text-bone">{playError}</p>
+            <button
+              type="button"
+              onClick={() => {
+                setPlayError(null);
+                videoRef.current?.load();
+              }}
+              className="mt-6 rounded-full border border-white/10 bg-graphite/40 px-4 py-2 text-xs text-bone transition-colors duration-300 hover:border-electric/40 hover:text-electric"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Controls */}

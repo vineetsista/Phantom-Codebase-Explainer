@@ -8,7 +8,12 @@ services:
     ports:
       - "3000:3000"
     environment:
+      # NEXT_PUBLIC_* is baked into the browser bundle; localhost works there.
       - NEXT_PUBLIC_API_URL=http://localhost:8000
+      # API_PROXY_TARGET is read server-side by next.config.js rewrites; inside
+      # the container `localhost` is the frontend itself, so we point at the
+      # docker service name instead.
+      - API_PROXY_TARGET=http://backend:8000
       - NODE_ENV=development
     depends_on:
       - backend
