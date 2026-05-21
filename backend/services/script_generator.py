@@ -430,7 +430,11 @@ def _generate_with_claude(analysis: AnalysisResult, api_key: str) -> dict[str, A
 
     message = client.messages.create(
         model="claude-sonnet-4-5",
-        max_tokens=3072,
+        # 8192 tokens — the schema gained ~3 KB of new required fields
+        # (architecture modules/connections/data_flows, code walkthrough
+        # highlights with code/annotation/cross_reference, why_it_matters).
+        # 3072 truncated mid-string on the first attempt.
+        max_tokens=8192,
         system=SYSTEM_PROMPT,
         messages=[
             {
