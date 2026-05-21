@@ -51,6 +51,11 @@ export interface VideoScript {
   /** Single sentence that ties the takeaways back to the hook. Rendered on
    * the first beat of the OutroScene. */
   why_it_matters?: string;
+  /** Per-takeaway-card reveal times in seconds, relative to the start of
+   * the summary section's audio. Set by the worker after voice synthesis
+   * via ElevenLabs alignment. `null` for any takeaway whose anchor phrase
+   * wasn't found in the audio. */
+  takeaway_seconds?: (number | null)[];
   /** Canonical chapter list — computed by video_assembler.compute_chapters
    * and embedded in script_data. The frontend player consumes this
    * directly. The Remotion composition doesn't need it but it's part of

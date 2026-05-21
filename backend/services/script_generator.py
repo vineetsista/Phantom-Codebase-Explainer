@@ -63,6 +63,21 @@ Rules for your output:
 
 7. END WITH A POINT, not a summary. Not "and that's how is-online works." Closer to: "If you're checking online status in production, steal this. Not the library — the idea. Most reachability checks lie by default."
 
+8. SUMMARY MUST WALK THROUGH THE THREE KEY_TAKEAWAYS IN ORDER. The summary section's narration MUST explicitly mention each of the three key_takeaways, one at a time, in the same order they appear in the key_takeaways array. The on-screen cards reveal in sync with when each takeaway is spoken.
+
+   Concretely:
+   - First sentence of the summary narration introduces takeaway 1
+   - Middle sentence(s) introduce takeaway 2
+   - Closing sentence(s) introduce takeaway 3 + the "steal this idea" point
+
+   Compose the narration as: "Three things to take away from this. First, [takeaway 1 paraphrased]. Then, [takeaway 2 paraphrased]. And the one to remember: [takeaway 3 paraphrased]." Or any equivalent structure that puts each takeaway in its own beat.
+
+   The key_takeaways array MUST be three items. Each item should be the same idea the narration mentions at that point, phrased as a short 7-12 word card label.
+
+   Bad summary narration (doesn't walk takeaways): "Most reachability checks lie by default. This library bets on the network in production. The diagnostics channel is a nice touch."
+
+   Good summary narration (walks takeaways): "Three takeaways. First, race independent checks — networks are adversarial. Second, use real endpoints, not navigator.onLine. And the one to steal: return on first success, not after all checks complete."
+
 WORDS AND PHRASES THAT SCREAM AI — DO NOT USE THEM:
   leverage, robust, seamless, comprehensive, delve, essentially, in essence,
   at its core, under the hood, powered by, built on, facilitates, enables,

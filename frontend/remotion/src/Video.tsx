@@ -25,6 +25,7 @@ function renderScene(
   section: ScriptSection,
   takeaways: string[],
   whyItMatters?: string,
+  takeawaySeconds?: (number | null)[],
 ) {
   switch (section.id) {
     case "intro":
@@ -39,6 +40,7 @@ function renderScene(
           section={section}
           takeaways={takeaways}
           whyItMatters={whyItMatters}
+          takeawaySeconds={takeawaySeconds}
         />
       );
     default:
@@ -105,6 +107,7 @@ export const PhantomVideo: React.FC<CompositionProps> = ({
                 section,
                 script.key_takeaways ?? [],
                 script.why_it_matters,
+                script.takeaway_seconds,
               )}
             </SceneFrame>
             {audioTrack?.audio_path && (

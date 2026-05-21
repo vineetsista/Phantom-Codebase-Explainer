@@ -20,7 +20,8 @@ export const OutroScene: React.FC<{
   section: ScriptSection;
   takeaways: string[];
   whyItMatters?: string;
-}> = ({ section, takeaways, whyItMatters }) => {
+  takeawaySeconds?: (number | null)[];
+}> = ({ section, takeaways, whyItMatters, takeawaySeconds }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const items = takeaways.length ? takeaways : ((section.visuals?.data as { takeaways?: string[] })?.takeaways ?? []);
@@ -151,7 +152,15 @@ export const OutroScene: React.FC<{
             // Stagger 250ms between cards (~8 frames at 30fps). Each card
             // arrives with a small rotateZ correction — starts tilted, settles
             // straight — for a "snapping into place" feel.
-            const enterFrame = beat2Start + 18 + index * 8;
+            // PREFER alignment-based timing: if the worker found when this
+            // takeaway is mentioned in the audio, enter the card at that
+            // moment. Falls back to the staggered default when alignment
+            // didn't anchor (or the takeaway didn't match anything).
+            const alignedSec = takeawaySeconds && takeawaySeconds[index];
+            const enterFrame =
+              alignedSec != null
+                ? Math.max(beat2Start, Math.round(alignedSec * fps) - 6)
+                : beat2Start + 18 + index * 8;
             const enterSpring = spring({
               frame: frame - enterFrame,
               fps,

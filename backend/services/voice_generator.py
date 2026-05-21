@@ -564,6 +564,40 @@ def sync_visuals_to_alignment(
                 anchored, len(highlights),
             )
 
+        elif sid == "summary":
+            # Anchor each key_takeaway card to the moment its content is
+            # first mentioned in the audio. Two-pronged match: try the
+            # full takeaway string, then a 2-3 word distinctive anchor.
+            takeaways = script.get("key_takeaways") or []
+            if takeaways:
+                takeaway_times: list[float | None] = []
+                for tk in takeaways:
+                    tk_str = str(tk or "")
+                    if not tk_str:
+                        takeaway_times.append(None)
+                        continue
+                    # Try first significant noun-bearing phrase. Pull
+                    # the first 3 substantive words (skip articles).
+                    tokens = [w for w in re.split(r"\W+", tk_str) if w and w.lower() not in {"a", "an", "the", "to", "for", "and", "or", "of", "in"}]
+                    anchor = " ".join(tokens[:3]) if tokens else tk_str
+                    t = find_phrase_time(alignment, anchor)
+                    if t is None and tokens:
+                        # Fall back to a single distinctive word
+                        for w in tokens:
+                            if len(w) >= 5:
+                                t = find_phrase_time(alignment, w)
+                                if t is not None:
+                                    break
+                    takeaway_times.append(t)
+                script["takeaway_seconds"] = [
+                    round(t, 2) if t is not None else None for t in takeaway_times
+                ]
+                anchored = sum(1 for t in takeaway_times if t is not None)
+                logger.info(
+                    "Sync summary: %d/%d takeaways anchored to alignment",
+                    anchored, len(takeaways),
+                )
+
     return script
 
 
