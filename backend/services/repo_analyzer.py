@@ -367,6 +367,31 @@ def _extract_modules(
 
 EXCERPT_MAX_LINES = 80
 EXCERPT_MAX_BYTES = 8_000
+EXCERPT_MAX_LINE_LENGTH = 80  # cap individual lines so they fit the code panel
+
+
+def _truncate_line(line: str, limit: int = EXCERPT_MAX_LINE_LENGTH) -> str:
+    """Truncate at a word boundary near `limit` chars and append '…' if the
+    line is too long for the renderer's code panel. Preserves leading
+    indentation. If no natural break exists, hard-truncates."""
+    if len(line) <= limit:
+        return line
+    indent_len = len(line) - len(line.lstrip())
+    indent = line[:indent_len]
+    body = line[indent_len:]
+    cap = limit - indent_len - 1  # leave room for "…"
+    if cap <= 1:
+        return indent + "…"
+    # Try a graceful break at the last whitespace/punctuation before the cap.
+    breakable = max(
+        body.rfind(" ", 0, cap),
+        body.rfind(",", 0, cap),
+        body.rfind(";", 0, cap),
+        body.rfind("(", 0, cap),
+    )
+    if breakable >= cap * 0.5:
+        return indent + body[:breakable].rstrip() + " …"
+    return indent + body[:cap] + "…"
 
 
 def _read_code_excerpt(root: Path, top_files: list[dict]) -> dict[str, Any]:
@@ -376,6 +401,10 @@ def _read_code_excerpt(root: Path, top_files: list[dict]) -> dict[str, Any]:
     couldn't see). The renderer still only displays an 18-line focus
     window — `focus_start_line`, set by the script generator, decides
     where that window lands.
+
+    Lines longer than EXCERPT_MAX_LINE_LENGTH characters are truncated at
+    a word boundary with a trailing ellipsis, so the code panel never has
+    to deal with overflow.
 
     Picks the largest source file that is plausibly hand-written (skips
     lockfiles, minified bundles, generated proto stubs)."""
@@ -390,7 +419,8 @@ def _read_code_excerpt(root: Path, top_files: list[dict]) -> dict[str, Any]:
             text = absolute.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        lines = text.splitlines()[:EXCERPT_MAX_LINES]
+        raw_lines = text.splitlines()[:EXCERPT_MAX_LINES]
+        lines = [_truncate_line(ln) for ln in raw_lines]
         code = "\n".join(lines)[:EXCERPT_MAX_BYTES]
         return {
             "path": path,

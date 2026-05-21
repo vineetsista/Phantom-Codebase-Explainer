@@ -40,6 +40,9 @@ const CODE_FONT_SIZE = 19;
 const VISIBLE_LINES = 14; // rows visible in the editor viewport
 const EDITOR_PAD_TOP = 28;
 const EDITOR_PAD_LEFT = 36;
+// Right padding inside the code panel so no character touches the border
+// even on the longest lines.
+const EDITOR_PAD_RIGHT = 24;
 const TITLE_BAR_HEIGHT = 44;
 // Right inset is generous so annotation cards (up to 300px wide + 36px
 // gutter) always have room beside the editor panel without overflowing
@@ -520,6 +523,9 @@ export const CodeWalkthroughScene: React.FC<{ section: ScriptSection }> = ({
                           whiteSpace: "pre",
                           height: LINE_HEIGHT,
                           paddingLeft: EDITOR_PAD_LEFT,
+                          paddingRight: EDITOR_PAD_RIGHT,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
                           filter: isCurrent
                             ? `drop-shadow(0 2px 8px ${COLORS.cyan}33)`
                             : undefined,
@@ -639,6 +645,7 @@ export const CodeWalkthroughScene: React.FC<{ section: ScriptSection }> = ({
               scrollOffset +
               LINE_HEIGHT / 2
             }
+            panelLeftEdge={PANEL_INSET.left}
             panelRightEdge={PANEL_INSET.left + (panelWidth * leftPanelWidthPct) / 100}
             compWidth={width}
           />
@@ -697,15 +704,18 @@ const Dot: React.FC<{ color: string }> = ({ color }) => (
   />
 );
 
-/** Floating annotation with a curved SVG path back to the highlighted line. */
+/** Floating annotation with a curved SVG path back to the highlighted line.
+ *  Auto-flips to the LEFT side of the panel if placing the card on the right
+ *  would push it off-screen. */
 const Annotation: React.FC<{
   text: string;
   startFrame: number;
   endFrame: number;
   lineY: number;
+  panelLeftEdge: number;
   panelRightEdge: number;
   compWidth: number;
-}> = ({ text, startFrame, endFrame, lineY, panelRightEdge, compWidth }) => {
+}> = ({ text, startFrame, endFrame, lineY, panelLeftEdge, panelRightEdge, compWidth }) => {
   const frame = useCurrentFrame();
   // Fade in over 9 frames (~300ms), hold, fade out over 21 frames (~700ms).
   const fadeOutStart = endFrame - 21;
@@ -717,28 +727,39 @@ const Annotation: React.FC<{
   );
   if (opacity <= 0.01) return null;
 
-  // Annotation card position: right of the panel, vertically centred on the
-  // highlighted line. minWidth keeps short text from collapsing into a
-  // single narrow column; maxWidth caps long text at a readable 2-3 line
-  // block.
-  const CARD_MIN_WIDTH = 200;
-  const CARD_MAX_WIDTH = 300;
-  const cardLeft = panelRightEdge + 36;
-  const cardWidth = Math.max(
-    CARD_MIN_WIDTH,
-    Math.min(CARD_MAX_WIDTH, compWidth - cardLeft - 60),
-  );
+  // Truncate text on a word boundary if absurdly long. The script generator
+  // is asked for 6-10 word annotations; this is just a safety belt.
+  const safeText =
+    text.length > 50 ? text.slice(0, text.lastIndexOf(" ", 48)).trim() + "…" : text;
+
+  // Card geometry. Width is fixed at 240 (per user spec). Frame margin is
+  // 40px on either side.
+  const CARD_WIDTH = 240;
+  const FRAME_MARGIN = 40;
+  const GAP = 36;
   const cardTop = lineY - 26;
 
-  // Path origin (right edge of the panel, at line y) → card centre-left.
-  // Drawn as a quadratic Bezier with a single control point pulled toward
-  // the midpoint, giving a graceful curve instead of a straight line.
-  const pathStartX = panelRightEdge - 2;
+  // Decide side. Prefer RIGHT; flip to LEFT if right would extend past
+  // (compWidth - FRAME_MARGIN).
+  const wouldClipRight = panelRightEdge + GAP + CARD_WIDTH > compWidth - FRAME_MARGIN;
+  const placeOnLeft = wouldClipRight;
+  const cardLeft = placeOnLeft
+    ? panelLeftEdge - GAP - CARD_WIDTH
+    : panelRightEdge + GAP;
+  // Connector path endpoints depend on which side.
+  const pathStartX = placeOnLeft ? panelLeftEdge + 2 : panelRightEdge - 2;
   const pathStartY = lineY;
-  const pathEndX = cardLeft + 4;
+  const pathEndX = placeOnLeft ? cardLeft + CARD_WIDTH - 4 : cardLeft + 4;
   const pathEndY = cardTop + 28;
   const ctrlX = (pathStartX + pathEndX) / 2;
   const ctrlY = (pathStartY + pathEndY) / 2 + 8;
+
+  // Clamp the card's left so it can't escape the frame even on edge cases
+  // (very small panel widths).
+  const clampedLeft = Math.max(
+    FRAME_MARGIN,
+    Math.min(compWidth - CARD_WIDTH - FRAME_MARGIN, cardLeft),
+  );
 
   return (
     <>
@@ -766,15 +787,14 @@ const Annotation: React.FC<{
       <div
         style={{
           position: "absolute",
-          left: cardLeft,
+          left: clampedLeft,
           top: cardTop,
-          width: cardWidth,
-          minWidth: CARD_MIN_WIDTH,
-          maxWidth: CARD_MAX_WIDTH,
-          padding: "14px 18px",
+          width: CARD_WIDTH,
+          minHeight: 60,
+          padding: "16px 20px",
           fontFamily: FONT_BODY,
           fontStyle: "italic",
-          fontSize: 18,
+          fontSize: 16,
           color: COLORS.text,
           background: "rgba(20,20,28,0.94)",
           border: `1px solid ${COLORS.cyan}55`,
@@ -784,10 +804,10 @@ const Annotation: React.FC<{
           // wrap on natural word boundaries — 2-3 lines for a 6-10 word annotation
           wordBreak: "normal",
           overflowWrap: "normal",
-          lineHeight: 1.35,
+          lineHeight: 1.4,
         }}
       >
-        {text}
+        {safeText}
       </div>
     </>
   );
