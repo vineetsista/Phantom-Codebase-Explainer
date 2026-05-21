@@ -36,6 +36,15 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a senior staff engineer recording a short video walkthrough of a codebase for an audience of other senior engineers you respect. You actually read the code — not just the README — and you have opinions.
 
+You are explaining the user's repo. Nothing else. Never describe:
+  - What AI tools do, or how this video was generated
+  - Phantom, narration, voiceover, "this video", "this explainer"
+  - Any meta-commentary about your own process, fallbacks in the
+    narration tool, or the way the explainer was assembled
+If you find yourself drifting into "the narrator", "the AI", "this
+video", or "the system" — stop and redirect to the actual code in the
+repo.
+
 Your job is to produce a script that makes a smart developer lean in and want to watch the whole thing. Not because it's flashy, but because every observation is specific, every claim is earned, and you sound like a human who actually knows what they're talking about.
 
 Rules for your output:
@@ -54,10 +63,51 @@ Rules for your output:
 
 7. END WITH A POINT, not a summary. Not "and that's how is-online works." Closer to: "If you're checking online status in production, steal this. Not the library — the idea. Most reachability checks lie by default."
 
+WORDS AND PHRASES THAT SCREAM AI — DO NOT USE THEM:
+  leverage, robust, seamless, comprehensive, delve, essentially, in essence,
+  at its core, under the hood, powered by, built on, facilitates, enables,
+  utilize, moreover, furthermore, in conclusion, it's worth noting,
+  often referred to as, the world of, navigating the, harness the power,
+  cutting-edge, fascinating, embark on, dive into, let's explore,
+  let's take a look, let's walk through, this video, this explainer,
+  this walkthrough, AI-generated, our narrator, our AI, fallback (only
+  use the word "fallback" if it refers to a literal fallback feature
+  inside the user's code — never as a vague positive)
+
+EM-DASHES are an AI tell. Use at most one per scene. Prefer periods.
+
+Three-item parallel lists ("X, Y, and Z") are an AI tell when stacked.
+Use two items, or four uneven ones, or restructure into separate
+sentences.
+
+EXAMPLE — BAD vs GOOD, SAME REPO (sindresorhus/is-online):
+
+BAD intro narration:
+  "Welcome to is-online, a comprehensive JavaScript library that
+  leverages multiple connectivity checks to seamlessly determine if
+  your device is online. Under the hood, it utilizes parallel HTTP
+  requests, DNS lookups, and an Apple captive portal test — a robust
+  approach that delivers reliable results across diverse environments."
+
+Why it's bad: "comprehensive", "leverages", "seamlessly", "utilizes",
+"under the hood", "robust", three-item parallel list, three em-dashes,
+"diverse environments" is meaningless.
+
+GOOD intro narration:
+  "navigator.onLine lies. It tells you you're connected to a network,
+  not that the internet exists. sindresorhus's is-online is 73 lines
+  that solve the actual problem — by racing four real checks against
+  the live internet and returning the first one that answers. Watch how
+  it bets on the network."
+
+Why it's good: opens with a specific technical claim, names the author,
+quotes a number from the code, has a stance ("bets on the network"),
+ends with momentum.
+
 Return ONLY valid JSON (no prose, no code fences) with this exact structure:
 
 {
-  "title": "string — the actual title, not 'X overview'. Max 80 chars.",
+  "title": "string — the actual title, not 'X overview'. Max 80 chars. No adverbs (no 'Reliably', 'Easily', etc.)",
   "hook": "string — single sentence, ~8 seconds spoken, makes a dev lean in",
   "sections": [
     {
@@ -78,38 +128,81 @@ You receive the full repo analysis as input. Use it. Quote actual file paths, ac
 """
 
 # Revision pass: ask Claude to fix lines that trigger the slop heuristics.
-REVISION_PROMPT = """The script you just wrote has lines that read like AI slop. Tighten them.
+REVISION_PROMPT = """The script you just wrote has lines that read like AI slop. Rewrite them as a senior engineer would.
 
-Heuristics that fire:
-- "Let's explore", "delve", "fascinating", "in conclusion", "the world of",
-  "embark on", "navigate the", "harness the power"
-- Three-item lists with parallel structure ("X, Y, and Z" three times in a row)
-- Em-dash bingo (more than 2 em-dashes in a single section)
-- Description without reaction: stating what code does without any opinion or surprise
-- Generic claims that could apply to any codebase ("uses modern patterns", "well-organized")
+The slop heuristics fired on these patterns:
+- META TELLS — describing AI / narration / video / "fallback" used as a
+  vague positive instead of a real feature in the user's code. This is
+  the worst kind of slop. Eliminate.
+- GENERIC POSITIVES — robust, seamless, comprehensive, leverages,
+  utilizes, facilitates, enables, powered by, under the hood, at its
+  core. Replace with a SPECIFIC observation about the actual code.
+- THROAT-CLEARING — "let's explore", "delve into", "take a look", "in
+  conclusion", "moreover", "furthermore", "it's worth noting".
+- EM-DASH BINGO — more than one em-dash in a section. Use periods.
+- THREE-ITEM PARALLEL LISTS — restructure into two items or unequal
+  separate sentences.
+- ADVERBS in the title or hook — "Reliably", "Easily", "Seamlessly".
+  Cut them.
 
-For each section flagged below, rewrite the narration to be MORE specific
-to this repo and MORE conversational. Same JSON shape, same section IDs,
-same approximate duration. Return only the JSON — no commentary."""
+You will be told which patterns matched which sections. Rewrite each
+flagged narration to be MORE specific to this repo and MORE
+conversational. Same JSON shape, same section IDs, same approximate
+duration. Return only the JSON — no commentary, no code fences."""
 
-# These are the AI-tell patterns we scan for. A section that matches any of
-# these gets sent through the revision pass. Conservative on purpose — false
-# positives just trigger a re-roll, which is cheap.
+
+# Meta-AI tells — phrases that betray the narrator is an AI describing
+# itself rather than the code. These are the most embarrassing slop and
+# the user explicitly flagged them. The `fallback` regex deliberately
+# only catches the meta uses (a free-floating "fallback" without a noun
+# nearby like "fallback URL" or "fallback strategy" that would indicate
+# the code itself has a fallback feature).
+_META_PATTERNS: tuple[re.Pattern, ...] = (
+    re.compile(r"\bAI[- ]generated\b", re.IGNORECASE),
+    re.compile(r"\bour (?:AI|narrator|system)\b", re.IGNORECASE),
+    re.compile(r"\bthis (?:video|explainer|walkthrough|narration)\b", re.IGNORECASE),
+    re.compile(r"\bphantom\b(?! .*(?:library|engine|type))", re.IGNORECASE),
+    re.compile(r"\bnarrator\b", re.IGNORECASE),
+    re.compile(r"\bnarration\b", re.IGNORECASE),
+    re.compile(r"\bvoiceover\b", re.IGNORECASE),
+)
+
+# Generic slop — words and phrases that read as AI on any topic.
 _SLOP_PATTERNS: tuple[re.Pattern, ...] = (
-    re.compile(r"\blet'?s (?:explore|dive into|take a look)\b", re.IGNORECASE),
+    # Throat-clearing / academic transitions
+    re.compile(r"\blet'?s (?:explore|dive into|take a look|walk through)\b", re.IGNORECASE),
     re.compile(r"\bdelv(?:e|ing)\b", re.IGNORECASE),
-    re.compile(r"\bfascinating\b", re.IGNORECASE),
     re.compile(r"\bin conclusion\b", re.IGNORECASE),
+    re.compile(r"\bin essence\b", re.IGNORECASE),
+    re.compile(r"\bat its core\b", re.IGNORECASE),
+    re.compile(r"\bunder the hood\b", re.IGNORECASE),
+    re.compile(r"\bit'?s worth noting\b", re.IGNORECASE),
+    re.compile(r"\boften referred to as\b", re.IGNORECASE),
+    re.compile(r"\bmoreover\b", re.IGNORECASE),
+    re.compile(r"\bfurthermore\b", re.IGNORECASE),
+    re.compile(r"\bessentially\b", re.IGNORECASE),
+    # Marketing-speak / vague positives
+    re.compile(r"\brobust\b", re.IGNORECASE),
+    re.compile(r"\bseamless(?:ly)?\b", re.IGNORECASE),
+    re.compile(r"\bcomprehensive(?:ly)?\b", re.IGNORECASE),
+    re.compile(r"\bleverag(?:e|es|ing|ed)\b", re.IGNORECASE),
+    re.compile(r"\butilize(?:s|d|ing)?\b", re.IGNORECASE),
+    re.compile(r"\bfacilitates?\b", re.IGNORECASE),
+    re.compile(r"\benables?\b", re.IGNORECASE),
+    re.compile(r"\bpowered by\b", re.IGNORECASE),
+    re.compile(r"\bcutting[- ]edge\b", re.IGNORECASE),
+    re.compile(r"\bfascinating\b", re.IGNORECASE),
     re.compile(r"\bthe world of\b", re.IGNORECASE),
     re.compile(r"\bembark on\b", re.IGNORECASE),
     re.compile(r"\bharness(?:es|ing)? the power\b", re.IGNORECASE),
     re.compile(r"\bnavigat(?:e|ing) the\b", re.IGNORECASE),
-    re.compile(r"\brobust\b", re.IGNORECASE),
-    re.compile(r"\bseamless(?:ly)?\b", re.IGNORECASE),
-    re.compile(r"\bleverag(?:e|es|ing)\b", re.IGNORECASE),
-    re.compile(r"\bcutting[- ]edge\b", re.IGNORECASE),
-    # 3+ em-dashes in a single section
-    re.compile(r"(?:.*—.*){3,}", re.DOTALL),
+    # Em-dash overload (2+ in one section)
+    re.compile(r"(?:.*—.*){2,}", re.DOTALL),
+)
+
+# Title/hook only — adverbs. Body narration can use them sparingly.
+_TITLE_ADVERB = re.compile(
+    r"\b(?:Reliably|Easily|Seamlessly|Effortlessly|Quickly|Simply|Beautifully|Powerfully)\b",
 )
 
 REQUIRED_SECTIONS = ("intro", "architecture", "code_walkthrough", "summary")
@@ -117,10 +210,14 @@ REQUIRED_SECTIONS = ("intro", "architecture", "code_walkthrough", "summary")
 
 def _slop_score(narration: str) -> list[str]:
     """Return the list of slop patterns that match the given narration. Empty
-    list means clean."""
+    list means clean. Meta-tells are listed first so the revision prompt
+    knows which ones are the embarrassing ones."""
     if not narration:
         return []
     hits: list[str] = []
+    for pattern in _META_PATTERNS:
+        if pattern.search(narration):
+            hits.append(f"META: {pattern.pattern}")
     for pattern in _SLOP_PATTERNS:
         if pattern.search(narration):
             hits.append(pattern.pattern)
@@ -160,21 +257,51 @@ def _generate_with_claude(analysis: AnalysisResult, api_key: str) -> dict[str, A
     )
     parsed = _extract_json(message)
 
-    # Stop-slop / revision pass — only if heuristics actually trigger,
-    # so we don't burn a second model call on every job.
-    flagged = _flag_sloppy_sections(parsed)
-    if flagged:
+    # Strip title adverbs ("Reliably Check…", "Easily Build…") before any
+    # revision pass. Cheap and deterministic — saves a round trip.
+    parsed["title"] = _scrub_title(parsed.get("title", ""))
+
+    # Up to 3 stop-slop / revision passes. Each pass is only invoked when
+    # heuristics actually fire, so the typical job pays for at most one
+    # extra model call. A pass that doesn't reduce the slop count gets
+    # short-circuited — Claude isn't improving, we'd just be burning
+    # tokens.
+    last_count = 1 << 30
+    for attempt in range(1, 4):
+        flagged = _flag_sloppy_sections(parsed)
+        if not flagged:
+            if attempt > 1:
+                logger.info("Stop-slop clean after %d revision pass(es)", attempt - 1)
+            break
+        if len(flagged) >= last_count:
+            logger.info(
+                "Revision pass %d didn't reduce slop (%d → %d). Shipping anyway.",
+                attempt - 1, last_count, len(flagged),
+            )
+            break
+        last_count = len(flagged)
         logger.info(
-            "Script first pass had %d sloppy sections (%s). Running revision pass.",
-            len(flagged), ", ".join(s["id"] for s in flagged),
+            "Script revision pass %d: %d sloppy section(s) — %s",
+            attempt, len(flagged), ", ".join(s["id"] for s in flagged),
         )
         try:
             parsed = _revise_with_claude(client, parsed, flagged)
+            parsed["title"] = _scrub_title(parsed.get("title", ""))
         except Exception as exc:
-            # Revision is best-effort — if it fails, ship the first pass.
-            logger.warning("Revision pass failed, shipping first-pass script: %s", exc)
+            logger.warning(
+                "Revision pass %d failed, shipping previous version: %s",
+                attempt, exc,
+            )
+            break
 
     return _normalize(parsed, analysis)
+
+
+def _scrub_title(title: str) -> str:
+    """Strip adverbs from titles. Single-pass regex; preserves the rest."""
+    cleaned = _TITLE_ADVERB.sub("", title or "")
+    # Collapse the doubled spaces that the substitution leaves behind.
+    return re.sub(r"\s{2,}", " ", cleaned).strip()
 
 
 def _extract_json(message: Any) -> dict[str, Any]:
