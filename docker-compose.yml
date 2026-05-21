@@ -40,8 +40,8 @@ services:
 
   worker:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile.worker
     env_file:
       - .env
     environment:
@@ -55,9 +55,17 @@ services:
     volumes:
       - ./backend:/app
       - ./output:/app/output
-      # Mount the Remotion project so the worker can shell out to `npx remotion render`.
-      # If node_modules isn't installed yet, the assembler falls back to ffmpeg.
+      # Bind-mount the Remotion source for live edits...
       - ./frontend/remotion:/app/remotion
+      # ...but keep the image-installed node_modules visible (the bind above
+      # would otherwise shadow them with the empty host folder). The anonymous
+      # volume is initialised from the image's /app/remotion/node_modules on
+      # first run, so the worker can call `npx remotion render` immediately.
+      - /app/remotion/node_modules
+      # remotion.config.ts sets publicDir to path.resolve(__dirname, "../public"),
+      # i.e. /app/public. Mount the frontend's public/ folder so brand fonts
+      # load and so we can drop per-job audio files into it for staticFile().
+      - ./frontend/public:/app/public
     command: celery -A workers.celery_app worker --loglevel=info --concurrency=2
 
   db:

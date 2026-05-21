@@ -1,8 +1,17 @@
 """Generate per-section voiceover audio using OpenAI TTS or ElevenLabs.
 
 Returns a list of {section_id, audio_path, duration_seconds_estimate} dicts.
-When no API key is available, generates silent WAV stubs of the appropriate
-duration so the video pipeline can still concatenate audio + video.
+
+Failure modes are explicit:
+ - Sections with no narration text → silent placeholder WAV (expected).
+ - Resolved provider is 'mock' (no keys configured at all) → silent WAVs for
+   every section, no errors raised.
+ - Resolved provider IS configured but the API returns an auth/credit/quota
+   error (401/402/403/429) → TTSConfigError is raised so the worker fails the
+   whole job with a clear message instead of quietly producing a silent
+   video. Silent video is worse than no video — it looks broken.
+ - Transient errors (network blip, 5xx) → one retry, then silent placeholder
+   with a warning log so the rest of the video still renders.
 """
 from __future__ import annotations
 
@@ -12,9 +21,17 @@ import wave
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+class TTSConfigError(RuntimeError):
+    """Raised when a configured TTS provider returns an unrecoverable error
+    (auth, payment, quota). The pipeline should fail the job — silently
+    falling back to silence would ship a broken-looking video."""
 
 
 def resolve_provider(requested: str | None = None) -> tuple[str, str]:
@@ -93,47 +110,112 @@ def generate(
         duration = int(section.get("duration_seconds") or 10)
         out_path = output_dir / f"{section_id}.mp3"
 
+        if not narration:
+            # No text to synthesize — silent placeholder is correct here.
+            logger.info(
+                "Section %s has empty narration — writing silent placeholder",
+                section_id,
+            )
+            out_path = out_path.with_suffix(".wav")
+            _silent_wav(out_path, duration)
+            results.append(
+                _segment(section_id, out_path, duration, chosen)
+            )
+            continue
+
+        if chosen == "mock":
+            # No configured provider — explicit silent run.
+            out_path = out_path.with_suffix(".wav")
+            _silent_wav(out_path, duration)
+            results.append(_segment(section_id, out_path, duration, chosen))
+            continue
+
         try:
-            if chosen == "openai" and narration:
+            if chosen == "openai":
                 _generate_openai(narration, out_path, settings.openai_api_key)
-            elif chosen == "elevenlabs" and narration:
+            elif chosen == "elevenlabs":
                 _generate_elevenlabs(narration, out_path, settings.elevenlabs_api_key)
             else:
-                if chosen != "mock":
-                    logger.info(
-                        "Section %s has no narration text — writing silent placeholder",
-                        section_id,
-                    )
-                _silent_wav(out_path.with_suffix(".wav"), duration)
-                out_path = out_path.with_suffix(".wav")
-        except Exception as exc:
+                raise TTSConfigError(f"Unknown TTS provider: {chosen!r}")
+        except TTSConfigError:
+            # Already explicit — propagate so the worker fails the job loudly.
+            raise
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code if exc.response is not None else 0
+            body = ""
+            try:
+                body = exc.response.text[:800] if exc.response is not None else ""
+            except Exception:
+                pass
+            if status in (401, 402, 403, 429):
+                msg = (
+                    f"{chosen} TTS returned HTTP {status} for section "
+                    f"{section_id!r}. Likely cause: missing/invalid key, "
+                    f"exhausted credits, or rate limit. Response: {body!r}"
+                )
+                logger.error("Unrecoverable TTS error: %s", msg)
+                raise TTSConfigError(msg) from exc
+            # Transient — log and fall back to silent for this segment only.
             logger.warning(
-                "TTS failed for section %s via %s, writing silent fallback: %s",
-                section_id, chosen, exc,
+                "Transient TTS error from %s (status=%s) for section %s: %s. "
+                "Writing silent placeholder for this section only.",
+                chosen, status, section_id, body,
             )
-            _silent_wav(out_path.with_suffix(".wav"), duration)
             out_path = out_path.with_suffix(".wav")
-
-        # Defensive: confirm the file landed and has non-zero bytes. If TTS
-        # silently returned an empty body, replace with a silent placeholder
-        # so the downstream concat doesn't blow up.
-        if not out_path.exists() or out_path.stat().st_size == 0:
+            _silent_wav(out_path, duration)
+        except Exception as exc:
+            # Detect "openai" SDK auth errors that don't surface as HTTPStatusError
+            type_name = type(exc).__name__
+            if type_name in (
+                "AuthenticationError",
+                "PermissionDeniedError",
+                "RateLimitError",
+                "InsufficientQuotaError",
+            ):
+                msg = (
+                    f"{chosen} TTS raised {type_name} for section "
+                    f"{section_id!r}: {exc}. Likely cause: missing/invalid "
+                    f"key or exhausted quota."
+                )
+                logger.error("Unrecoverable TTS error: %s", msg)
+                raise TTSConfigError(msg) from exc
+            # Truly transient (network blip, decode glitch) — segment-level
+            # silent fallback so the rest of the video still renders.
             logger.warning(
-                "Audio file for section %s is missing or empty (path=%s) — using silent fallback",
-                section_id, out_path,
+                "Transient TTS error from %s for section %s (%s): %s. "
+                "Writing silent placeholder for this section only.",
+                chosen, section_id, type_name, exc,
             )
             out_path = out_path.with_suffix(".wav")
             _silent_wav(out_path, duration)
 
-        results.append(
-            {
-                "section_id": section_id,
-                "audio_path": str(out_path),
-                "duration_seconds": duration,
-                "provider": chosen,
-            }
-        )
+        # Sanity: if the provider returned but the file is missing/empty,
+        # treat that as an unrecoverable provider error too.
+        if not out_path.exists() or out_path.stat().st_size == 0:
+            msg = (
+                f"{chosen} TTS for section {section_id!r} returned no audio "
+                f"data (path={out_path}). Treating as provider failure."
+            )
+            logger.error(msg)
+            raise TTSConfigError(msg)
+
+        results.append(_segment(section_id, out_path, duration, chosen))
+
     return results
+
+
+def _segment(
+    section_id: str,
+    out_path: Path,
+    duration: int,
+    provider: str,
+) -> dict[str, Any]:
+    return {
+        "section_id": section_id,
+        "audio_path": str(out_path),
+        "duration_seconds": duration,
+        "provider": provider,
+    }
 
 
 def _generate_openai(text: str, out_path: Path, api_key: str) -> None:

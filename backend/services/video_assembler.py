@@ -60,19 +60,61 @@ def assemble(
     music_src = _detect_music_src(settings.remotion_project_dir)
     logger.info("assemble job=%s music_src=%s", job_id, music_src)
 
+    # Remotion's renderer can't load `file://` URIs — it explicitly rejects
+    # anything not http/https in `@remotion/renderer/.../download-file.js`.
+    # Copy each per-job audio file into the shared publicDir so the scenes
+    # can reference them via `staticFile("jobs/<id>/audio/intro.mp3")`, which
+    # resolves to a localhost URL the bundled Chromium can fetch.
+    public_dir = Path(settings.remotion_project_dir).parent / "public"
+    public_audio_dir = public_dir / "jobs" / job_id / "audio"
+    public_audio_dir.mkdir(parents=True, exist_ok=True)
+
+    audio_for_props: list[dict[str, Any]] = []
+    for entry in audio_files:
+        copy = dict(entry)
+        raw = entry.get("audio_path", "")
+        if raw:
+            src_path = Path(raw).resolve()
+            if src_path.is_file():
+                dst_path = public_audio_dir / src_path.name
+                try:
+                    shutil.copyfile(src_path, dst_path)
+                except OSError as exc:
+                    logger.warning(
+                        "assemble job=%s failed to copy %s → %s: %s",
+                        job_id, src_path, dst_path, exc,
+                    )
+                    dst_path = src_path
+                # staticFile() resolves relative paths under publicDir → URL.
+                rel = f"jobs/{job_id}/audio/{src_path.name}"
+                copy["audio_path"] = rel
+            else:
+                logger.warning(
+                    "assemble job=%s referenced audio missing on disk: %s",
+                    job_id, src_path,
+                )
+                copy["audio_path"] = ""
+        audio_for_props.append(copy)
+
+    abs_diagram = str(Path(diagram_svg_path).resolve()) if diagram_svg_path else ""
+
     props_path = Path(settings.temp_dir) / job_id / "composition-props.json"
     props_path.parent.mkdir(parents=True, exist_ok=True)
     props_path.write_text(
         json.dumps(
             {
                 "script": script,
-                "audio": audio_files,
-                "diagramSvgPath": str(diagram_svg_path),
+                "audio": audio_for_props,
+                "diagramSvgPath": abs_diagram,
                 "musicSrc": music_src,
             },
             indent=2,
         ),
         encoding="utf-8",
+    )
+    logger.info(
+        "assemble job=%s props written to %s (audio_count=%d, public_audio_dir=%s)",
+        job_id, props_path.resolve(), len(audio_for_props), public_audio_dir,
     )
 
     duration = sum(int(s.get("duration_seconds") or 10) for s in script.get("sections", []))
@@ -134,14 +176,29 @@ def _remotion_available(remotion_dir: str) -> bool:
 def _render_with_remotion(
     remotion_dir: str, props_path: Path, video_path: Path
 ) -> None:
+    # Remotion's CLI is invoked with cwd=remotion_dir; the props file and the
+    # output video live under the worker's working tree, not under
+    # remotion_dir. Pass absolute paths so the CLI doesn't try to resolve
+    # them relative to /app/remotion.
+    abs_props = props_path.resolve()
+    abs_video = video_path.resolve()
+    abs_video.parent.mkdir(parents=True, exist_ok=True)
+
+    # The CLI's resolution of publicDir from remotion.config.ts has been
+    # inconsistent in some builds — the bundle came up with no `public/`
+    # subdirectory even when Config.setPublicDir was set. Passing it
+    # explicitly on the CLI is the durable fix.
+    public_dir = (Path(remotion_dir).parent / "public").resolve()
+
     cmd = [
         "npx",
         "remotion",
         "render",
         "src/index.ts",
         "PhantomVideo",
-        str(video_path),
-        f"--props={props_path}",
+        str(abs_video),
+        f"--props={abs_props}",
+        f"--public-dir={public_dir}",
         "--codec=h264",
         "--image-format=jpeg",
         "--log=warn",
@@ -150,7 +207,7 @@ def _render_with_remotion(
     proc = subprocess.run(
         cmd,
         cwd=remotion_dir,
-        timeout=600,
+        timeout=900,
         capture_output=True,
         text=True,
     )
@@ -159,6 +216,10 @@ def _render_with_remotion(
             f"remotion render exited {proc.returncode}\n"
             f"stdout: {proc.stdout[-2000:]}\n"
             f"stderr: {proc.stderr[-2000:]}"
+        )
+    if not abs_video.is_file() or abs_video.stat().st_size == 0:
+        raise RuntimeError(
+            f"remotion render reported success but {abs_video} is missing or empty"
         )
 
 

@@ -1,0 +1,70 @@
+# Worker image. Includes everything the API container has plus the Node /
+# Remotion / headless-Chromium toolchain needed to run `npx remotion render`.
+#
+# Build context: the project root (so we can COPY both backend/ and
+# frontend/remotion/ in a single image). Set in docker-compose.yml.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    NODE_ENV=production
+
+# System dependencies:
+#   - git: shallow-cloning analyzed repos
+#   - ffmpeg: fallback render + audio concat + thumbnail extraction
+#   - chromium + supporting libraries: Remotion's renderer drives Chromium
+#     to rasterize each React frame. Without these libs the browser fails
+#     to launch and Remotion's compositor silently falls back to ffmpeg.
+#   - fonts-liberation: makes sans-serif text render at all when our brand
+#     fonts haven't been dropped into public/fonts yet.
+#   - Node 20: provided via nodesource so `npx remotion` resolves the CLI.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        ffmpeg \
+        curl \
+        ca-certificates \
+        gnupg \
+        chromium \
+        fonts-liberation \
+        libnss3 \
+        libdbus-1-3 \
+        libatk1.0-0 \
+        libatk-bridge2.0-0 \
+        libcups2 \
+        libxkbcommon0 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxrandr2 \
+        libgbm1 \
+        libpango-1.0-0 \
+        libcairo2 \
+        libasound2 \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# --- Python dependencies ---
+COPY backend/requirements.txt /app/requirements.txt
+RUN pip install -r /app/requirements.txt
+
+# --- Remotion project + its node_modules ---
+# Copy the Remotion package first so its install is cached across backend
+# code changes. The bind mount in docker-compose carries the same source
+# at runtime, but the *node_modules* we install here are preserved across
+# restarts via an anonymous volume on /app/remotion/node_modules.
+COPY frontend/remotion /app/remotion
+RUN cd /app/remotion \
+    && npm install --omit=dev --no-audit --no-fund \
+    && npm cache clean --force
+
+# --- Backend application code ---
+COPY backend /app
+
+RUN mkdir -p /app/output/videos /app/output/thumbnails /app/output/temp /app/output/repos
+
+EXPOSE 8000
+
+CMD ["celery", "-A", "workers.celery_app", "worker", "--loglevel=info", "--concurrency=2"]

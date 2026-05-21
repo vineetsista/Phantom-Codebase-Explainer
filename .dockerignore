@@ -1,0 +1,13 @@
+# Avoid sending big trees to the Docker daemon.
+**/node_modules
+**/.next
+**/.git
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/dist
+**/build
+**/.venv
+output
+.env.local
+*.log

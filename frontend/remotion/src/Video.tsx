@@ -69,11 +69,17 @@ export const PhantomVideo: React.FC<CompositionProps> = ({
 };
 
 function resolveAudio(path: string): string {
-  // Remotion's render CLI accepts both file:// URIs and absolute paths.
-  // When the path is already a file:// or http(s):// URL, return as-is;
-  // otherwise wrap it as a file URL so the Chromium renderer can load it.
-  if (path.startsWith("file://") || path.startsWith("http")) return path;
-  return `file://${path.replace(/\\/g, "/")}`;
+  // Remotion's renderer explicitly rejects file:// URIs (see
+  // @remotion/renderer/dist/assets/download-file.js). The backend now
+  // copies per-job audio into publicDir and emits a relative path like
+  // "jobs/<id>/audio/intro.mp3"; resolve those through staticFile() so
+  // Chromium fetches them over HTTP from Remotion's dev server.
+  if (!path) return path;
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  if (path.startsWith("file://")) return path;
+  // Strip any leading slashes; staticFile expects publicDir-relative.
+  const cleaned = path.replace(/^\/+/, "");
+  return staticFile(cleaned);
 }
 
 // Re-export Sequence/staticFile so consumers don't have to import them separately.
