@@ -3,75 +3,14 @@
 @tailwind utilities;
 
 /* =========================================================================
-   FONTS — self-hosted, drop .woff2 files into /public/fonts/.
-   The browser uses system fallbacks until the files exist.
+   FONTS — loaded from CDN via <link> tags in app/layout.tsx.
+     Clash Display + Satoshi  →  api.fontshare.com  (free for commercial use)
+     JetBrains Mono           →  fonts.googleapis.com
+   The previous self-hosted @font-face rules pointed at /fonts/*.woff2 files
+   that were never actually committed; every page render generated 9 font
+   404s that blocked the first contentful paint by 10-20s. The CDN URLs
+   load the same fonts without the 404 storm.
    ========================================================================= */
-
-@font-face {
-  font-family: "Clash Display";
-  src: url("/fonts/clash-display-500.woff2") format("woff2");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Clash Display";
-  src: url("/fonts/clash-display-600.woff2") format("woff2");
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Clash Display";
-  src: url("/fonts/clash-display-700.woff2") format("woff2");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Satoshi";
-  src: url("/fonts/satoshi-400.woff2") format("woff2");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Satoshi";
-  src: url("/fonts/satoshi-500.woff2") format("woff2");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Satoshi";
-  src: url("/fonts/satoshi-700.woff2") format("woff2");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "JetBrains Mono";
-  src: url("/fonts/jetbrains-mono-400.woff2") format("woff2");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "JetBrains Mono";
-  src: url("/fonts/jetbrains-mono-500.woff2") format("woff2");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "JetBrains Mono";
-  src: url("/fonts/jetbrains-mono-700.woff2") format("woff2");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
 
 /* =========================================================================
    ROOT TOKENS — see tailwind.config.ts for the full palette

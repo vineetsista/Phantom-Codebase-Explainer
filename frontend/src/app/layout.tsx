@@ -67,6 +67,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
+        {/* Brand fonts loaded from CDN — Fontshare for Clash Display + Satoshi,
+            Google Fonts for JetBrains Mono. preconnect first so the TLS
+            handshake happens in parallel with the HTML download. */}
+        <link rel="preconnect" href="https://api.fontshare.com" />
+        <link rel="preconnect" href="https://cdn.fontshare.com" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          rel="stylesheet"
+          href="https://api.fontshare.com/v2/css?f[]=clash-display@500,600,700&f[]=satoshi@400,500,700&display=swap"
+        />
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap"
+        />
         <JsonLd
           data={[
             {
