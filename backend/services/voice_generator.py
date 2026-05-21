@@ -103,12 +103,47 @@ _JARGON: dict[str, str] = {
 }
 
 
+def _stutter_proof(text: str) -> str:
+    """Normalisation pass that eliminates the inputs known to trigger
+    ElevenLabs stutters / mispronunciations / weird emphasis.
+
+    Run BEFORE the punctuation-break + jargon passes so subsequent
+    regex doesn't have to handle e.g. ".." or repeated whitespace.
+    """
+    # Collapse repeated punctuation. ElevenLabs hiccups on ".." or "?!"
+    # and treats it as an emphatic stutter.
+    text = re.sub(r"\.{2,}", ".", text)
+    text = re.sub(r"!{2,}", "!", text)
+    text = re.sub(r"\?{2,}", "?", text)
+    text = re.sub(r"[!?]{2,}", "?", text)
+
+    # Stumble words — "the the", "a a" — usually slips from Claude when
+    # it edits a sentence. Collapse them.
+    text = re.sub(r"\b(the|a|an|is|of|to|and|or|in|on)\s+\1\b", r"\1", text, flags=re.IGNORECASE)
+
+    # Spell out symbols that ElevenLabs reads inconsistently.
+    text = re.sub(r"\s*&\s*", " and ", text)
+    text = re.sub(r"(\w)@(\w)", r"\1 at \2", text)
+    # "/" between words is read awkwardly; replace with "or" only when
+    # it's clearly a word/word separator (not a path).
+    text = re.sub(r"(\b\w{2,})\s*/\s*(\w{2,}\b)", r"\1 or \2", text)
+
+    # Collapse weird whitespace.
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
+
+
 def _preprocess_narration(text: str) -> str:
     """Apply jargon substitutions + insert ElevenLabs break tags between
     sentences so the cadence reads as natural speech rather than
     Wikipedia-bot prose."""
     if not text:
         return text
+
+    # Stutter-proof pass first — eliminates ".."  / "the the" / "X/Y"
+    # before any other transform runs.
+    text = _stutter_proof(text)
 
     # Punctuation-aware breaks. ElevenLabs respects the `<break>` tag and
     # treats it as a pause of the requested length. The prior version
