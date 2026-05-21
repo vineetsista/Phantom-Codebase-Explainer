@@ -91,20 +91,28 @@ export default function VideoPage() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <ToolbarButton onClick={() => setShareOpen(true)}>
+            <button type="button" onClick={() => setShareOpen(true)} className={TOOLBAR_BTN}>
               <Share2 className="h-4 w-4" /> Share
-            </ToolbarButton>
+            </button>
             {video.video_url && (
-              <ToolbarButton as="a" href={video.video_url} download>
+              <a href={video.video_url} download className={TOOLBAR_BTN}>
                 <Download className="h-4 w-4" /> Download
-              </ToolbarButton>
+              </a>
             )}
-            <ToolbarButton as="a" href={video.repo_url} target="_blank" rel="noreferrer">
+            <a
+              href={video.repo_url}
+              target="_blank"
+              rel="noreferrer"
+              className={TOOLBAR_BTN}
+            >
               <ExternalLink className="h-4 w-4" /> Repo
-            </ToolbarButton>
-            <ToolbarButton as={Link} href={`/generate?url=${encodeURIComponent(video.repo_url)}`}>
+            </a>
+            <Link
+              href={`/generate?url=${encodeURIComponent(video.repo_url)}`}
+              className={TOOLBAR_BTN}
+            >
               <RefreshCw className="h-4 w-4" /> Regenerate
-            </ToolbarButton>
+            </Link>
           </div>
         </div>
 
@@ -158,40 +166,12 @@ function Badge({ children }: { children: React.ReactNode }) {
   );
 }
 
-type ToolbarButtonProps =
-  | (React.ButtonHTMLAttributes<HTMLButtonElement> & { as?: "button"; children: React.ReactNode })
-  | (React.AnchorHTMLAttributes<HTMLAnchorElement> & { as: "a"; children: React.ReactNode })
-  | (React.ComponentProps<typeof Link> & { as: typeof Link; children: React.ReactNode });
-
-function ToolbarButton(props: ToolbarButtonProps) {
-  const base =
-    "inline-flex h-10 items-center gap-2 rounded-full border border-white/10 bg-graphite/40 px-4 text-sm text-bone transition-all duration-300 ease-luxe hover:border-electric/40 hover:text-electric";
-
-  if ("as" in props && props.as === "a") {
-    const { as: _, children, className, ...rest } = props;
-    return (
-      <a {...rest} className={`${base} ${className ?? ""}`}>
-        {children}
-      </a>
-    );
-  }
-  if ("as" in props && props.as === Link) {
-    const { as: As, children, className, ...rest } = props;
-    return (
-      <Link {...(rest as React.ComponentProps<typeof Link>)} className={`${base} ${className ?? ""}`}>
-        {children}
-      </Link>
-    );
-  }
-  const { children, className, ...rest } = props as React.ButtonHTMLAttributes<HTMLButtonElement> & {
-    children: React.ReactNode;
-  };
-  return (
-    <button type="button" {...rest} className={`${base} ${className ?? ""}`}>
-      {children}
-    </button>
-  );
-}
+// Shared className for the per-video action toolbar (Share / Download / Repo /
+// Regenerate). A polymorphic <ToolbarButton as={...}> component was tried but
+// React's HTMLAttributes<T> unions don't narrow cleanly under strict mode —
+// raw button/anchor/Link at the call site is simpler and provably typesafe.
+const TOOLBAR_BTN =
+  "inline-flex h-10 items-center gap-2 rounded-full border border-white/10 bg-graphite/40 px-4 text-sm text-bone transition-all duration-300 ease-luxe hover:border-electric/40 hover:text-electric";
 
 function humanizeSection(id: string): string {
   switch (id) {
