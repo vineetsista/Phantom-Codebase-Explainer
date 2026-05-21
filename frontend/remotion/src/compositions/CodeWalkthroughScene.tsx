@@ -343,6 +343,28 @@ export const CodeWalkthroughScene: React.FC<{ section: ScriptSection }> = ({
                 overflow: "hidden",
               }}
             >
+              {/* Drifting scanline — sweeps top-to-bottom across the viewport
+                  every 8 seconds at 5% opacity. Ambient motion that keeps
+                  the panel from going visually static between highlight
+                  transitions. */}
+              {(() => {
+                const periodFrames = 8 * fps;
+                const phase = (frame % periodFrames) / periodFrames; // 0..1
+                const scanY = phase * viewportHeight;
+                return (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      top: scanY,
+                      height: 64,
+                      background: `linear-gradient(180deg, transparent 0%, ${COLORS.cyan}10 50%, transparent 100%)`,
+                      pointerEvents: "none",
+                    }}
+                  />
+                );
+              })()}
               <div
                 style={{
                   position: "absolute",
@@ -376,6 +398,23 @@ export const CodeWalkthroughScene: React.FC<{ section: ScriptSection }> = ({
                         borderLeft: `2px solid ${COLORS.cyan}`,
                         borderRadius: 6,
                         boxShadow: `0 0 32px -8px ${COLORS.cyan}66`,
+                      }}
+                    />
+                  )}
+                  {/* Cursor blink at end-of-active-line — small motion that
+                      keeps the panel from going visually quiet between
+                      annotations. Two-frame on / two-frame off blink. */}
+                  {activeLineNumber != null && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: `calc(${EDITOR_PAD_LEFT}px + ${(rawLines[activeLineNumber - 1] || "").length * 0.55}ch)`,
+                        top: (activeLineNumber - 1) * LINE_HEIGHT + 4,
+                        width: "0.55ch",
+                        height: LINE_HEIGHT - 8,
+                        background: COLORS.cyan,
+                        opacity: Math.floor(frame / 12) % 2 === 0 ? 0.9 : 0.15,
+                        boxShadow: `0 0 8px ${COLORS.cyan}`,
                       }}
                     />
                   )}
