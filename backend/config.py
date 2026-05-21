@@ -29,6 +29,16 @@ class Settings(BaseSettings):
     max_repo_size_mb: int = 100
     default_voice: str = "openai"
     default_quality: str = "720p"
+    # Brian — warmer male voice that handles tech narration better than the
+    # ElevenLabs default Rachel. Override per-deployment via env if you find
+    # something better; see voice_generator._ELEVENLABS_DEFAULTS for the
+    # voice_settings that go with it.
+    default_elevenlabs_voice_id: str = "nPczCjzI2devNBz1zQrb"
+    # Model choice: turbo_v2_5 is ~3x faster and 3x cheaper than multilingual
+    # _v2 but slightly less expressive on rapid sentences. Turbo wins on our
+    # ~150 wpm tech narration; flip to multilingual_v2 if you're cutting
+    # longer-form pieces where rhythm matters more than throughput.
+    elevenlabs_model_id: str = "eleven_turbo_v2_5"
 
     remotion_project_dir: str = "/app/remotion"
 

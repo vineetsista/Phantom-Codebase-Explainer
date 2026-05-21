@@ -16,9 +16,11 @@ Failure modes are explicit:
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import struct
 import subprocess
+import time
 import wave
 from pathlib import Path
 from typing import Any
@@ -28,6 +30,97 @@ import httpx
 from config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# --- Voice tuning ----------------------------------------------------------
+# Settings tuned for tech narration with Brian. Lower stability gives more
+# emotional variation (the voice "leans in" on emphasis); style at 0.20 adds
+# personality without going theatrical; speaker_boost cleans up sibilance at
+# the higher gain that headphone listeners use.
+_ELEVENLABS_DEFAULTS = {
+    "stability": 0.40,
+    "similarity_boost": 0.75,
+    "style": 0.20,
+    "use_speaker_boost": True,
+}
+
+# --- Tech jargon pronunciation map -----------------------------------------
+# Most TTS engines (Brian included) get common acronyms wrong by default.
+# These are spelled out the way an engineer says them aloud. Keep entries
+# short and case-sensitive; the substitution is word-bounded so a longer
+# identifier like "JSONSchema" or "API_KEY" doesn't get mangled.
+#
+# Order matters for overlapping cases (i18n before "in" — n/a here, but
+# something to watch when extending).
+_JARGON: dict[str, str] = {
+    # ❌ Brian reads "npm" as "num". Force individual letters.
+    "npm": "N P M",
+    "URL": "U R L",
+    "URLs": "U R Ls",
+    "SQL": "sequel",       # industry convention
+    "JSON": "Jason",
+    "YAML": "yamel",
+    "OAuth": "O auth",
+    "i18n": "internationalization",
+    "l10n": "localization",
+    "k8s": "Kubernetes",
+    "GCP": "G C P",
+    "AWS": "A W S",
+    "S3": "S three",
+    "EC2": "E C two",
+    "REST": "REST",        # already pronounced as a word
+    "GraphQL": "graph Q L",
+    "JWT": "J W T",
+    "CLI": "C L I",
+    "TLS": "T L S",
+    "SSL": "S S L",
+    "DNS": "D N S",
+    "CDN": "C D N",
+    "CI/CD": "C I C D",
+    "CSS": "C S S",
+    "HTML": "H T M L",
+    "TS": "T S",
+    "JS": "J S",
+    "Postgres": "Postgress",  # otherwise reads as "Post-grease"
+    "Redis": "Red-iss",
+    "nginx": "engine X",
+    "regex": "reg-ex",
+    "AI": "A I",
+    "LLM": "L L M",
+    "GPT": "G P T",
+}
+
+
+def _preprocess_narration(text: str) -> str:
+    """Apply jargon substitutions + insert ElevenLabs break tags between
+    sentences so the cadence reads as natural speech rather than
+    Wikipedia-bot prose."""
+    if not text:
+        return text
+
+    # Sentence-level breaks: ". " → ". <break time=\"250ms\"/> "
+    # The trailing space is preserved so the resulting text still parses
+    # as natural prose for engines that ignore the tag.
+    text = re.sub(
+        r"(?<=[.!?])\s+(?=[A-Z\"'])",
+        ' <break time="250ms"/> ',
+        text,
+    )
+
+    # Jargon substitution. Use \b word boundaries so "api" inside
+    # "diaphragm" isn't matched. Apply longest tokens first so "GraphQL"
+    # beats "QL" when both could match (none do today, but cheap to be
+    # safe).
+    for token in sorted(_JARGON.keys(), key=len, reverse=True):
+        replacement = _JARGON[token]
+        # Word boundaries don't fire on "/" — match literally for tokens
+        # that contain it (CI/CD).
+        if any(ch in token for ch in "/"):
+            pattern = re.escape(token)
+        else:
+            pattern = r"\b" + re.escape(token) + r"\b"
+        text = re.sub(pattern, replacement, text)
+
+    return text
 
 
 def probe_duration(path: Path | str) -> float | None:
@@ -178,11 +271,30 @@ def generate(
             results.append(_segment(section_id, out_path, duration, chosen))
             continue
 
+        # Apply jargon + break preprocessing before sending to TTS. Logged
+        # at debug so we can see exactly what the API received without
+        # spamming INFO with every narration body.
+        prepared = _preprocess_narration(narration)
+        if prepared != narration:
+            logger.debug(
+                "section=%s narration_preprocessed (original=%d chars, prepared=%d chars)",
+                section_id, len(narration), len(prepared),
+            )
+
         try:
             if chosen == "openai":
-                _generate_openai(narration, out_path, settings.openai_api_key)
+                # OpenAI's TTS doesn't honor ElevenLabs <break> tags — strip
+                # them but keep the punctuation cadence intact.
+                openai_text = re.sub(r'<break[^/]*/>', "", prepared).strip()
+                _generate_openai(openai_text, out_path, settings.openai_api_key)
             elif chosen == "elevenlabs":
-                _generate_elevenlabs(narration, out_path, settings.elevenlabs_api_key)
+                _generate_elevenlabs(
+                    prepared,
+                    out_path,
+                    settings.elevenlabs_api_key,
+                    voice_id=settings.default_elevenlabs_voice_id,
+                    model_id=settings.elevenlabs_model_id,
+                )
             else:
                 raise TTSConfigError(f"Unknown TTS provider: {chosen!r}")
         except TTSConfigError:
@@ -327,26 +439,58 @@ def _generate_openai(text: str, out_path: Path, api_key: str) -> None:
             fp.write(response.read())
 
 
-def _generate_elevenlabs(text: str, out_path: Path, api_key: str) -> None:
+def _generate_elevenlabs(
+    text: str,
+    out_path: Path,
+    api_key: str,
+    *,
+    voice_id: str,
+    model_id: str,
+    max_attempts: int = 4,
+) -> None:
+    """Call ElevenLabs TTS with exponential-backoff retries on 429 (and 5xx).
+    Caller still gets HTTPStatusError on auth errors (4xx other than 429)
+    and on the final failed attempt."""
     import httpx
 
-    voice_id = "21m00Tcm4TlvDq8ikWAM"  # Rachel — ElevenLabs default
-    response = httpx.post(
-        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-        headers={
-            "xi-api-key": api_key,
-            "Content-Type": "application/json",
-            "Accept": "audio/mpeg",
-        },
-        json={
-            "text": text,
-            "model_id": "eleven_turbo_v2",
-            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
-        },
-        timeout=60,
-    )
-    response.raise_for_status()
-    out_path.write_bytes(response.content)
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    body = {
+        "text": text,
+        "model_id": model_id,
+        "voice_settings": _ELEVENLABS_DEFAULTS,
+    }
+
+    attempt = 0
+    delay = 1.0
+    while True:
+        attempt += 1
+        response = httpx.post(
+            url,
+            headers={
+                "xi-api-key": api_key,
+                "Content-Type": "application/json",
+                "Accept": "audio/mpeg",
+            },
+            json=body,
+            timeout=60,
+        )
+        if response.status_code < 400:
+            out_path.write_bytes(response.content)
+            return
+
+        retryable = response.status_code == 429 or response.status_code >= 500
+        if not retryable or attempt >= max_attempts:
+            response.raise_for_status()  # final — propagate to caller
+
+        # Honor Retry-After when the API provides it; otherwise exponential.
+        retry_after = response.headers.get("Retry-After")
+        wait = float(retry_after) if retry_after and retry_after.replace(".", "", 1).isdigit() else delay
+        logger.warning(
+            "ElevenLabs returned %d on attempt %d/%d, backing off %.1fs",
+            response.status_code, attempt, max_attempts, wait,
+        )
+        time.sleep(wait)
+        delay = min(delay * 2, 16.0)
 
 
 def _silent_wav(path: Path, duration_seconds: int) -> None:
