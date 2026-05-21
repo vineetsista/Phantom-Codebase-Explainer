@@ -676,18 +676,27 @@ const Annotation: React.FC<{
   if (opacity <= 0.01) return null;
 
   // Annotation card position: right of the panel, vertically centred on the
-  // highlighted line.
-  const cardLeft = panelRightEdge + 32;
-  const cardWidth = Math.min(280, compWidth - cardLeft - 80);
-  const cardTop = lineY - 30;
+  // highlighted line. minWidth keeps short text from collapsing into a
+  // single narrow column; maxWidth caps long text at a readable 2-3 line
+  // block.
+  const CARD_MIN_WIDTH = 200;
+  const CARD_MAX_WIDTH = 300;
+  const cardLeft = panelRightEdge + 36;
+  const cardWidth = Math.max(
+    CARD_MIN_WIDTH,
+    Math.min(CARD_MAX_WIDTH, compWidth - cardLeft - 60),
+  );
+  const cardTop = lineY - 26;
 
-  // Path origin (right edge of the panel, at line y) → card center-left
+  // Path origin (right edge of the panel, at line y) → card centre-left.
+  // Drawn as a quadratic Bezier with a single control point pulled toward
+  // the midpoint, giving a graceful curve instead of a straight line.
   const pathStartX = panelRightEdge - 2;
   const pathStartY = lineY;
   const pathEndX = cardLeft + 4;
-  const pathEndY = cardTop + 30;
-  const ctrl1X = pathStartX + 30;
-  const ctrl2X = pathEndX - 30;
+  const pathEndY = cardTop + 28;
+  const ctrlX = (pathStartX + pathEndX) / 2;
+  const ctrlY = (pathStartY + pathEndY) / 2 + 8;
 
   return (
     <>
@@ -703,7 +712,7 @@ const Annotation: React.FC<{
         }}
       >
         <path
-          d={`M ${pathStartX} ${pathStartY} C ${ctrl1X} ${pathStartY}, ${ctrl2X} ${pathEndY}, ${pathEndX} ${pathEndY}`}
+          d={`M ${pathStartX} ${pathStartY} Q ${ctrlX} ${ctrlY}, ${pathEndX} ${pathEndY}`}
           stroke={COLORS.cyan}
           strokeWidth={1.25}
           fill="none"
@@ -718,16 +727,21 @@ const Annotation: React.FC<{
           left: cardLeft,
           top: cardTop,
           width: cardWidth,
-          padding: "12px 18px",
+          minWidth: CARD_MIN_WIDTH,
+          maxWidth: CARD_MAX_WIDTH,
+          padding: "14px 18px",
           fontFamily: FONT_BODY,
           fontStyle: "italic",
           fontSize: 18,
           color: COLORS.text,
-          background: "rgba(20,20,28,0.92)",
+          background: "rgba(20,20,28,0.94)",
           border: `1px solid ${COLORS.cyan}55`,
           borderRadius: 12,
           boxShadow: `0 8px 32px -8px ${COLORS.cyan}33`,
           opacity,
+          // wrap on natural word boundaries — 2-3 lines for a 6-10 word annotation
+          wordBreak: "normal",
+          overflowWrap: "normal",
           lineHeight: 1.35,
         }}
       >
