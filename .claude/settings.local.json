@@ -4,7 +4,10 @@
       "Bash(npx skills *)",
       "Bash(git init *)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('scripts/build-onepager.py', encoding='utf-8'\\).read\\(\\)\\); print\\('onepager OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('scripts/build-lead-magnet.py', encoding='utf-8'\\).read\\(\\)\\); print\\('lead-magnet OK'\\)\")",
+      "Bash(python -c \"import reportlab; print\\('reportlab', reportlab.__version__\\)\")"
     ]
   }
 }
