@@ -1,9 +1,13 @@
 import logging
+import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Generator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import get_settings
@@ -46,11 +50,101 @@ app.include_router(videos.router)
 # Serve generated MP4s and thumbnails so the frontend can <video src=...>
 Path(settings.video_output_dir).mkdir(parents=True, exist_ok=True)
 Path(settings.thumbnail_output_dir).mkdir(parents=True, exist_ok=True)
-app.mount(
-    "/media/videos",
-    StaticFiles(directory=settings.video_output_dir),
-    name="videos",
-)
+
+
+# --- Range-aware video serving ------------------------------------------------
+# FastAPI's StaticFiles mount returns HTTP 200 with the full body for every
+# request, even when the client sends a Range header. Browsers REQUIRE 206
+# Partial Content responses to enable timeline seeking on <video> — without
+# them the only thing that works is sequential playback from frame 0. That's
+# the "scrubber doesn't work" bug.
+#
+# Implementing the protocol by hand because StaticFiles can't be subclassed
+# cleanly to add Range support and the FileResponse helper doesn't honor
+# Range either. The handler below:
+#   - Parses Range: bytes=START-END (single-range only, which covers every
+#     real <video> client in practice)
+#   - Returns 206 with Content-Range, Content-Length, and the requested
+#     byte window streamed in 64 KB chunks
+#   - Returns 200 + full body when no Range header is present
+#   - Returns 416 Range Not Satisfiable when the range is malformed or
+#     beyond the file end
+_RANGE_RE = re.compile(r"^bytes=(\d+)-(\d*)$")
+_CHUNK = 64 * 1024
+
+
+def _iter_file(path: Path, start: int, end: int) -> Generator[bytes, None, None]:
+    """Stream `path` from byte `start` to byte `end` inclusive."""
+    remaining = end - start + 1
+    with open(path, "rb") as fp:
+        fp.seek(start)
+        while remaining > 0:
+            data = fp.read(min(_CHUNK, remaining))
+            if not data:
+                break
+            remaining -= len(data)
+            yield data
+
+
+@app.get("/media/videos/{filename:path}")
+async def serve_video(filename: str, request: Request) -> StreamingResponse:
+    """Range-aware MP4 server. Required for HTML5 <video> timeline seeking."""
+    # Reject any path that tries to escape the videos directory. `..` and
+    # absolute paths both get rejected via the resolve-vs-resolve check.
+    base = Path(settings.video_output_dir).resolve()
+    target = (base / filename).resolve()
+    try:
+        target.relative_to(base)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+
+    file_size = target.stat().st_size
+    range_header = request.headers.get("range") or request.headers.get("Range")
+
+    if not range_header:
+        # No Range request — serve the whole file as 200. Browser will
+        # still buffer linearly but seeking is enabled by the moov atom
+        # being at the front of the file.
+        return StreamingResponse(
+            _iter_file(target, 0, file_size - 1),
+            media_type="video/mp4",
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(file_size),
+                "Cache-Control": "public, max-age=3600",
+            },
+        )
+
+    match = _RANGE_RE.match(range_header.strip())
+    if not match:
+        raise HTTPException(status_code=416, detail="Invalid Range")
+    start = int(match.group(1))
+    end_str = match.group(2)
+    end = int(end_str) if end_str else file_size - 1
+    if start > end or start >= file_size:
+        raise HTTPException(
+            status_code=416,
+            detail=f"Range {start}-{end} not satisfiable for file of {file_size} bytes",
+        )
+    end = min(end, file_size - 1)
+    content_length = end - start + 1
+
+    return StreamingResponse(
+        _iter_file(target, start, end),
+        status_code=206,
+        media_type="video/mp4",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Content-Length": str(content_length),
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
+
+
+# Thumbnails — small PNGs, no Range needed.
 app.mount(
     "/media/thumbnails",
     StaticFiles(directory=settings.thumbnail_output_dir),
