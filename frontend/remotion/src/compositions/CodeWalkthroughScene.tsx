@@ -41,9 +41,12 @@ const VISIBLE_LINES = 14; // rows visible in the editor viewport
 const EDITOR_PAD_TOP = 28;
 const EDITOR_PAD_LEFT = 36;
 const TITLE_BAR_HEIGHT = 44;
+// Right inset is generous so annotation cards (up to 300px wide + 36px
+// gutter) always have room beside the editor panel without overflowing
+// the composition. Left + bottom inset stay reasonable.
 const PANEL_INSET = {
   left: 140,
-  right: 140,
+  right: 380,
   top: 250,
   bottom: 130,
 };
