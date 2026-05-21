@@ -9,7 +9,10 @@ import {
 
 import { BackgroundGrid } from "../components/BackgroundGrid";
 import { CameraMove } from "../components/CameraMove";
+import { FocusGlow } from "../components/FocusGlow";
+import { HaloRings } from "../components/HaloRings";
 import { Particles } from "../components/Particles";
+import { SETTLE } from "../components/motion";
 import { FONT_BODY, FONT_DISPLAY, FONT_MONO } from "../loadFonts";
 import { COLORS, type ScriptSection } from "../types";
 
@@ -21,12 +24,20 @@ export const OutroScene: React.FC<{
   const { fps } = useVideoConfig();
   const items = takeaways.length ? takeaways : ((section.visuals?.data as { takeaways?: string[] })?.takeaways ?? []);
 
-  const headerSpring = spring({ frame, fps, config: { damping: 18, stiffness: 130 } });
+  const headerSpring = spring({ frame, fps, config: SETTLE });
+
+  // Estimate the scene's frame budget so HaloRings fire at the right time.
+  // Same calculation as in CodeWalkthroughScene.
+  const totalFrames = Math.round(
+    ((section.audio_duration_seconds ?? section.duration_seconds ?? 12) + 1.0) * 30,
+  );
+  const haloStart = Math.max(0, totalFrames - 60);
 
   return (
     <AbsoluteFill>
       <BackgroundGrid />
       <Particles count={22} seed={items.length * 23 + 7} speed={0.6} />
+      <FocusGlow x={50} y={50} radius={70} intensity={0.10} />
       <CameraMove pan="right" intensity={1}>
       <AbsoluteFill
         style={{
@@ -54,20 +65,25 @@ export const OutroScene: React.FC<{
 
         <div style={{ marginTop: 56, display: "flex", flexDirection: "column", gap: 32, maxWidth: 1500 }}>
           {items.slice(0, 5).map((item, index) => {
-            const enterFrame = 18 + index * 12;
+            // Stagger 250ms between cards (~8 frames at 30fps). Each card
+            // arrives with a small rotateZ correction — starts tilted, settles
+            // straight — for a "snapping into place" feel.
+            const enterFrame = 18 + index * 8;
             const enterSpring = spring({
               frame: frame - enterFrame,
               fps,
-              config: { damping: 20, stiffness: 120 },
+              config: SETTLE,
             });
             const opacity = interpolate(enterSpring, [0, 1], [0, 1]);
-            const slideX = interpolate(enterSpring, [0, 1], [-40, 0]);
+            const slideX = interpolate(enterSpring, [0, 1], [-60, 0]);
+            const rotateZ = interpolate(enterSpring, [0, 1], [-5, 0]);
             return (
               <div
                 key={item}
                 style={{
                   opacity,
-                  transform: `translateX(${slideX}px)`,
+                  transform: `translateX(${slideX}px) rotate(${rotateZ}deg)`,
+                  transformOrigin: "left center",
                   display: "flex",
                   alignItems: "center",
                   gap: 28,
@@ -102,6 +118,9 @@ export const OutroScene: React.FC<{
           })}
         </div>
 
+        {/* Closing beat: PHANTOM wordmark grows into place over the final
+            ~2 seconds, surrounded by three expanding halo rings.  This is
+            the last frame the viewer sees — it has to land. */}
         <div
           style={{
             position: "absolute",
@@ -109,18 +128,46 @@ export const OutroScene: React.FC<{
             left: 0,
             right: 0,
             textAlign: "center",
+            fontFamily: FONT_DISPLAY,
+            fontWeight: 800,
+            letterSpacing: 14,
+            textTransform: "uppercase",
+            color: COLORS.text,
+            fontSize: interpolate(
+              spring({ frame: frame - haloStart, fps, config: SETTLE }),
+              [0, 1],
+              [44, 64],
+            ),
+            opacity: interpolate(frame, [haloStart, haloStart + 12], [0, 1], {
+              extrapolateRight: "clamp",
+            }),
+            textShadow: `0 0 24px ${COLORS.cyan}44`,
+          }}
+        >
+          PHANTOM
+        </div>
+        <div
+          style={{
+            position: "absolute",
+            bottom: 50,
+            left: 0,
+            right: 0,
+            textAlign: "center",
             fontFamily: FONT_MONO,
-            fontSize: 18,
+            fontSize: 14,
             letterSpacing: 6,
             textTransform: "uppercase",
             color: "rgba(245,245,240,0.55)",
-            opacity: interpolate(frame, [50, 80], [0, 1], { extrapolateRight: "clamp" }),
+            opacity: interpolate(frame, [haloStart + 6, haloStart + 24], [0, 1], {
+              extrapolateRight: "clamp",
+            }),
           }}
         >
-          phantom.video · repox
+          phantom.video
         </div>
       </AbsoluteFill>
       </CameraMove>
+      <HaloRings startFrame={haloStart} durationFrames={50} maxRadius={520} />
     </AbsoluteFill>
   );
 };

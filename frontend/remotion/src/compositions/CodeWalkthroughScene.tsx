@@ -9,6 +9,7 @@ import {
 
 import { BackgroundGrid } from "../components/BackgroundGrid";
 import { CameraMove } from "../components/CameraMove";
+import { FocusGlow } from "../components/FocusGlow";
 import { Particles } from "../components/Particles";
 import { Watermark } from "../components/Watermark";
 import { FONT_BODY, FONT_DISPLAY, FONT_MONO } from "../loadFonts";
@@ -146,6 +147,7 @@ export const CodeWalkthroughScene: React.FC<{ section: ScriptSection }> = ({ sec
     <AbsoluteFill>
       <BackgroundGrid />
       <Particles count={18} seed={(data.path ?? "x").length * 13 + 11} speed={0.5} />
+      <FocusGlow x={50} y={60} radius={62} intensity={0.06} />
 
       <CameraMove pan="right" intensity={0.5}>
       <div
@@ -213,7 +215,9 @@ export const CodeWalkthroughScene: React.FC<{ section: ScriptSection }> = ({ sec
           boxShadow: `0 0 80px -32px ${COLORS.cyan}55`,
         }}
       >
-        {/* Highlight box scans behind the code, picking out each interesting line in turn */}
+        {/* Highlight backplate — sits behind the line text. Position is
+            recomputed each frame, no CSS transition (Remotion CSS transitions
+            don't render). */}
         {activeHighlight && (
           <div
             style={{
@@ -222,11 +226,29 @@ export const CodeWalkthroughScene: React.FC<{ section: ScriptSection }> = ({ sec
               right: 12,
               top: 28 + (activeHighlight.lineNumber - 1) * LINE_HEIGHT - 2,
               height: LINE_HEIGHT + 4,
-              background: `linear-gradient(90deg, ${COLORS.cyan}22, ${COLORS.cyan}11 60%, transparent)`,
+              background: `linear-gradient(90deg, ${COLORS.cyan}28, ${COLORS.cyan}14 60%, transparent)`,
               borderLeft: `2px solid ${COLORS.cyan}`,
               borderRadius: 6,
               opacity: activeHighlight.appear,
-              transition: "top 320ms cubic-bezier(0.16, 1, 0.3, 1)",
+              boxShadow: `0 0 32px -8px ${COLORS.cyan}66`,
+            }}
+          />
+        )}
+        {/* Wipe-in underline — sweeps left-to-right over ~10 frames at the
+            start of each highlight, then stays. */}
+        {activeHighlight && (
+          <div
+            style={{
+              position: "absolute",
+              left: 56,
+              right: 12,
+              top: 28 + (activeHighlight.lineNumber - 1) * LINE_HEIGHT + LINE_HEIGHT - 1,
+              height: 2,
+              background: `linear-gradient(90deg, ${COLORS.cyan}, ${COLORS.cyan}88 80%, transparent)`,
+              opacity: activeHighlight.appear,
+              transformOrigin: "left center",
+              transform: `scaleX(${activeHighlight.appear})`,
+              boxShadow: `0 0 12px ${COLORS.cyan}`,
             }}
           />
         )}
@@ -241,28 +263,32 @@ export const CodeWalkthroughScene: React.FC<{ section: ScriptSection }> = ({ sec
             extrapolateLeft: "clamp",
             extrapolateRight: "clamp",
           });
-          // When a highlight is active, dim every OTHER line to 40% so the
-          // viewer's eye is pulled to the line the narrator is talking about.
+          // When a highlight is active, dim every OTHER line to 35% so the
+          // viewer's eye is pulled to the line the narrator is on. The
+          // highlighted line also lifts forward in z with a small drop
+          // shadow, so it reads as physically closer to the camera.
           const isHighlighted =
             activeHighlight && activeHighlight.lineNumber === index + 1;
-          const dim = activeHighlight && !isHighlighted ? 0.4 : 1;
+          const dim = activeHighlight && !isHighlighted ? 0.35 : 1;
           const opacity = baseOpacity * dim;
+          const lift = isHighlighted ? 1.015 : 1;
           return (
             <div
               key={index}
               style={{
                 opacity,
-                transform: `translateX(${slide}px)`,
+                transform: `translateX(${slide}px) scale(${lift})`,
+                transformOrigin: "left center",
                 position: "relative",
                 whiteSpace: "pre",
-                transition: "opacity 200ms ease-out",
+                filter: isHighlighted ? `drop-shadow(0 2px 8px ${COLORS.cyan}33)` : undefined,
               }}
             >
               <span
                 style={{
                   display: "inline-block",
                   width: 44,
-                  color: PALETTE.comment,
+                  color: isHighlighted ? COLORS.cyan : PALETTE.comment,
                   userSelect: "none",
                   textAlign: "right",
                   paddingRight: 14,

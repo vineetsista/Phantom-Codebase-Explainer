@@ -9,9 +9,12 @@ import {
 
 import { BackgroundGrid } from "../components/BackgroundGrid";
 import { CameraMove } from "../components/CameraMove";
+import { FocusGlow } from "../components/FocusGlow";
 import { Particles } from "../components/Particles";
+import { ScanLineReveal } from "../components/ScanLineReveal";
 import { Watermark } from "../components/Watermark";
 import { FONT_BODY, FONT_DISPLAY } from "../loadFonts";
+import { SETTLE, pulse } from "../components/motion";
 import { COLORS, type ScriptModule, type ScriptSection } from "../types";
 
 const BOX_COLORS = [
@@ -57,10 +60,24 @@ export const ArchitectureScene: React.FC<{ section: ScriptSection }> = ({ sectio
     });
   }, [modules.length, startX, startY, cols]);
 
+  // The "active module" rotates through modules as the scene plays —
+  // synthesises the per-narration mention without needing structured
+  // timing from the script. Module N is "active" during the Nth equal
+  // slice of the scene's middle section.
+  const totalFrames = Math.round(
+    ((section.audio_duration_seconds ?? section.duration_seconds ?? 22) + 1.0) * 30,
+  );
+  const activeWindow = Math.max(60, Math.floor((totalFrames - 90) / Math.max(1, modules.length)));
+  const activeIndex = Math.min(
+    modules.length - 1,
+    Math.max(0, Math.floor((frame - 60) / activeWindow)),
+  );
+
   return (
     <AbsoluteFill>
       <BackgroundGrid />
       <Particles count={20} seed={modules.length * 41 + 1} speed={0.8} />
+      <FocusGlow x={50} y={55} radius={70} intensity={0.07} />
 
       <CameraMove pan="left" intensity={0.7}>
       <div
@@ -135,12 +152,25 @@ export const ArchitectureScene: React.FC<{ section: ScriptSection }> = ({ sectio
         const enter = spring({
           frame: frame - enterFrame,
           fps,
-          config: { damping: 18, stiffness: 140 },
+          config: SETTLE,
         });
         const c = centers[index];
         const color = BOX_COLORS[index % BOX_COLORS.length];
-        const opacity = interpolate(enter, [0, 1], [0, 1]);
+
+        // Currently-being-narrated module gets a lift forward + a slight
+        // y-axis tilt + a breathing pulse. Other modules dim and recede.
+        const isActive = activeIndex === index && frame > 60;
+        const isAfterEntry = frame >= enterFrame + 12;
+        const pulseScale = isActive && isAfterEntry ? pulse(frame, fps) : 1;
+        const dimOpacity = isActive
+          ? 1
+          : isAfterEntry && frame > 60
+            ? 0.55
+            : interpolate(enter, [0, 1], [0, 1]);
+        const tiltDeg = isActive ? 5 : 0;
+        const liftScale = isActive ? 1.05 : 1;
         const y = c.y + interpolate(enter, [0, 1], [40, 0]);
+
         return (
           <div
             key={module.name + index}
@@ -148,32 +178,49 @@ export const ArchitectureScene: React.FC<{ section: ScriptSection }> = ({ sectio
               position: "absolute",
               left: c.x,
               top: y,
-              opacity,
+              opacity: dimOpacity,
               width: boxW,
               height: boxH,
-              borderRadius: 24,
-              padding: 28,
-              background: "#111118",
-              border: `1.5px solid ${color}`,
-              boxShadow: `0 0 48px -16px ${color}, 0 0 0 1px rgba(255,255,255,0.04)`,
-              fontFamily: FONT_BODY,
-              color: COLORS.text,
+              transform: `perspective(900px) rotateY(${tiltDeg}deg) scale(${liftScale * pulseScale})`,
+              transformOrigin: "center center",
+              zIndex: isActive ? 2 : 1,
             }}
           >
-            <div style={{ fontFamily: FONT_DISPLAY, fontSize: 32, fontWeight: 700 }}>
-              {module.name}
-            </div>
-            <div style={{ marginTop: 6, color, fontSize: 20 }}>{module.role}</div>
-            <div
-              style={{
-                marginTop: 18,
-                fontSize: 18,
-                color: "rgba(245,245,240,0.62)",
-                lineHeight: 1.4,
-              }}
-            >
-              {(module.description ?? "").slice(0, 90)}
-            </div>
+            <ScanLineReveal startFrame={enterFrame} durationFrames={14} height={boxH}>
+              <div
+                style={{
+                  width: boxW,
+                  height: boxH,
+                  borderRadius: 24,
+                  padding: 28,
+                  background: "#111118",
+                  border: `1.5px solid ${isActive ? COLORS.cyan : color}`,
+                  boxShadow: isActive
+                    ? `0 0 64px -8px ${COLORS.cyan}, 0 0 0 1px rgba(0,240,255,0.18)`
+                    : `0 0 48px -16px ${color}, 0 0 0 1px rgba(255,255,255,0.04)`,
+                  fontFamily: FONT_BODY,
+                  color: COLORS.text,
+                  boxSizing: "border-box",
+                }}
+              >
+                <div style={{ fontFamily: FONT_DISPLAY, fontSize: 32, fontWeight: 700 }}>
+                  {module.name}
+                </div>
+                <div style={{ marginTop: 6, color: isActive ? COLORS.cyan : color, fontSize: 20 }}>
+                  {module.role}
+                </div>
+                <div
+                  style={{
+                    marginTop: 18,
+                    fontSize: 18,
+                    color: "rgba(245,245,240,0.62)",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {(module.description ?? "").slice(0, 90)}
+                </div>
+              </div>
+            </ScanLineReveal>
           </div>
         );
       })}

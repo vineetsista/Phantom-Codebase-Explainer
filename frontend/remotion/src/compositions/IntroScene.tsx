@@ -10,7 +10,9 @@ import {
 import { AnimatedCounter } from "../components/AnimatedCounter";
 import { BackgroundGrid } from "../components/BackgroundGrid";
 import { CameraMove } from "../components/CameraMove";
+import { ChromaticGlitch } from "../components/ChromaticGlitch";
 import { CodeRain } from "../components/CodeRain";
+import { FocusGlow } from "../components/FocusGlow";
 import { LogoMark } from "../components/LogoMark";
 import { Particles } from "../components/Particles";
 import { TypewriterText } from "../components/TypewriterText";
@@ -59,6 +61,8 @@ export const IntroScene: React.FC<{ section: ScriptSection }> = ({ section }) =>
       <Particles count={28} seed={Math.floor((data?.title ?? "x").length * 17)} />
       {/* Near layer: blurred code rain, slowest visual element. */}
       <CodeRain />
+      {/* Focus glow draws the eye to where the title will land. */}
+      <FocusGlow x={50} y={48} radius={55} intensity={0.10} />
 
       <CameraMove pan="right" intensity={0.85}>
         <AbsoluteFill style={center}>
@@ -75,7 +79,12 @@ export const IntroScene: React.FC<{ section: ScriptSection }> = ({ section }) =>
               color: COLORS.cyan,
             }}
           >
-            PHANTOM · REPOX
+            {/* One brief chromatic glitch in the opening seconds — signals
+                "this is a generated video" without belaboring the point.
+                Triggers at frame ~24, ~6 frames after the kicker fades in. */}
+            <ChromaticGlitch startFrame={kickerStart + 6} durationFrames={6} amplitude={5}>
+              PHANTOM · REPOX
+            </ChromaticGlitch>
           </div>
 
           <div
