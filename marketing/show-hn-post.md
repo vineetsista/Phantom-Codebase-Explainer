@@ -20,7 +20,7 @@ Hey HN — I'm Vineet.
 Phantom takes a public GitHub URL and produces a 2-5 minute narrated video that walks you through the codebase: architecture, key files, design choices.
 
 Live demo: https://phantom.video (first video is free, no signup)
-Source: https://github.com/vsista/phantom
+Source: https://github.com/vineetsista/Phantom
 
 How it works under the hood:
 

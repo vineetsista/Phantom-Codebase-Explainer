@@ -46,7 +46,7 @@ WHAT I HAVEN'T SOLVED
 - Real dependency-graph extraction from imports (currently structural from the file tree)
 - Private repo support (PAT handling, encryption at rest — next week)
 
-Source: github.com/vsista/phantom
+Source: github.com/vineetsista/Phantom
 Try it: phantom.video (one free video without signup so you can see what comes out)
 
 Curious what edge cases this falls apart on. If you have a repo it gets wrong, reply with the link.
@@ -89,7 +89,7 @@ THINGS I HAVEN'T SOLVED
 - The analyzer doesn't read source code to extract data flow. Adds latency + cost; trying to figure out whether the quality bump justifies it.
 - Audio quality from tts-1-hd is fine but not great. The natural pause between sentences is wrong for narration-over-animation. Considering switching to ElevenLabs for the premium tier and accepting the cost increase.
 
-Code: github.com/vsista/phantom (Apache 2.0)
+Code: github.com/vineetsista/Phantom (Apache 2.0)
 Try it: phantom.video
 
 Would love feedback on the architecture, especially from anyone who's built LLM-orchestrated pipelines with strict output schemas.

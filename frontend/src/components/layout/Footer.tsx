@@ -25,7 +25,7 @@ const columns: { title: string; links: FooterLink[] }[] = [
     title: "Resources",
     links: [
       {
-        href: "https://github.com/vsista/phantom",
+        href: "https://github.com/vineetsista/Phantom",
         label: "GitHub",
         external: true,
       },

@@ -125,7 +125,7 @@ Three things I didn't expect:
 
 Live at [phantom.video](https://phantom.video). First video is free, no signup. If you find a repo it gets wrong, message me — that's how it gets better.
 
-Source code: [github.com/vsista/phantom](https://github.com/vsista/phantom) (Apache 2.0).
+Source code: [github.com/vineetsista/Phantom](https://github.com/vineetsista/Phantom) (Apache 2.0).
 
 ---
 

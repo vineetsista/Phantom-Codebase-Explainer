@@ -57,7 +57,7 @@ export default function AboutPage() {
           Generate your first video →
         </Link>
         <a
-          href="https://github.com/vsista/phantom"
+          href="https://github.com/vineetsista/Phantom"
           target="_blank"
           rel="noreferrer"
           className="inline-flex h-12 items-center rounded-full border border-white/10 px-6 text-sm font-medium text-bone transition-colors duration-300 hover:border-electric/40 hover:text-electric"
