@@ -103,6 +103,76 @@ _JARGON: dict[str, str] = {
 }
 
 
+def _scrub_unspeakable(text: str) -> str:
+    """Strip strings the narrator should not read aloud: URLs, long
+    domain names, file paths, anything that turns into a string of
+    spelled-out characters. The user reported these as 'big long
+    links and other useless/random stuff that the audience doesn't
+    want to hear.'
+
+    Rules:
+      - https?://... URLs are dropped entirely (with trailing punctuation
+        repaired)
+      - Bare domain names with 3+ dots (e.g. "o-o.myaddr.l.google.com")
+        get shortened to their TLD-anchor segment ("Google's resolver")
+        when context is recognisable; otherwise dropped
+      - 2-dot domains stay (e.g. "captive.apple.com" reads acceptably)
+      - File paths with 2+ slashes ("src/foo/bar.js") get reduced to the
+        basename ("bar.js")
+    """
+    # Drop full URLs entirely, replacing with "the URL" if the surrounding
+    # sentence needs a noun, else just remove.
+    # First: "at https://..." → "at the endpoint"
+    text = re.sub(
+        r"\b(at|to|from|via|hits?|queries|fetch(?:es)?)\s+https?://\S+",
+        r"\1 the endpoint",
+        text,
+        flags=re.IGNORECASE,
+    )
+    # Generic remaining URL → empty
+    text = re.sub(r"https?://\S+", "", text)
+
+    # Long DNS names with 3+ dots that aren't well-known short ones.
+    # Replace with a generic stand-in based on TLD guess.
+    def _replace_long_dns(match: re.Match[str]) -> str:
+        host = match.group(0)
+        # If it's a single short noun-like host (e.g. "icanhazip.com"),
+        # leave it — ElevenLabs reads those reasonably as "icanhazip dot com"
+        # Only nuke the gnarly multi-subdomain ones.
+        parts = host.split(".")
+        if len(parts) <= 2 and max(len(p) for p in parts) >= 4:
+            return host
+        # Guess the service from the domain root.
+        root = parts[-2].lower() if len(parts) >= 2 else ""
+        if root in {"google", "googleapis", "gstatic"}:
+            return "Google's DNS"
+        if root in {"opendns", "cisco"}:
+            return "OpenDNS"
+        if root in {"cloudflare", "one"}:
+            return "Cloudflare"
+        if root == "apple":
+            return "Apple's captive portal"
+        return "that endpoint"
+    text = re.sub(
+        r"\b[A-Za-z0-9][A-Za-z0-9\-]*(?:\.[A-Za-z0-9\-]+){2,}\b",
+        _replace_long_dns,
+        text,
+    )
+
+    # File paths with 2+ slashes: reduce to basename.
+    # e.g. "src/services/voice_generator.py" → "voice_generator.py"
+    text = re.sub(
+        r"\b(?:[A-Za-z0-9_\-]+/){2,}([A-Za-z0-9_\-]+\.[A-Za-z]{1,5})\b",
+        r"\1",
+        text,
+    )
+
+    # Clean up orphan commas and double spaces left behind.
+    text = re.sub(r"\s+([,.;])", r"\1", text)
+    text = re.sub(r"\s{2,}", " ", text)
+    return text
+
+
 def _stutter_proof(text: str) -> str:
     """Normalisation pass that eliminates the inputs known to trigger
     ElevenLabs stutters / mispronunciations / weird emphasis.
@@ -110,6 +180,10 @@ def _stutter_proof(text: str) -> str:
     Run BEFORE the punctuation-break + jargon passes so subsequent
     regex doesn't have to handle e.g. ".." or repeated whitespace.
     """
+    # Strip URLs / long DNS / deep paths FIRST so we don't waste subsequent
+    # passes on stuff the narrator shouldn't read at all.
+    text = _scrub_unspeakable(text)
+
     # Collapse repeated punctuation. ElevenLabs hiccups on ".." or "?!"
     # and treats it as an emphatic stutter.
     text = re.sub(r"\.{2,}", ".", text)
@@ -556,14 +630,65 @@ def sync_visuals_to_alignment(
             modules = data.get("modules") or []
             connections = data.get("connections") or []
             module_times: dict[str, float] = {}
+
+            # First pass: try each module's distinctive search keys IN ORDER,
+            # collect the candidate timestamps. Each module's chosen anchor
+            # must be UNIQUE — once a timestamp is taken by one module,
+            # another module landing on the same timestamp is treated as
+            # "no match found" and stays unset. This eliminates the bug
+            # where `appleCheck` would fall back to its file_path
+            # "index.js" and match the very first occurrence (used by the
+            # actual index.js module).
+            taken: set[float] = set()
+            # File paths shared by multiple modules can't be used as a
+            # disambiguating anchor — e.g. appleCheck and urlCheck both
+            # live in index.js. Don't even try the file_path fallback for
+            # those.
+            fp_counts: dict[str, int] = {}
             for m in modules:
-                label = m.get("label") or m.get("id") or ""
-                # Try the label first, then the file_path's final segment
                 fp = (m.get("file_path") or "").rsplit("/", 1)[-1]
-                t = find_phrase_time(alignment, label) or find_phrase_time(alignment, fp)
+                if fp:
+                    fp_counts[fp] = fp_counts.get(fp, 0) + 1
+
+            for m in modules:
+                label = (m.get("label") or m.get("id") or "").strip()
+                candidates: list[str] = []
+                if label:
+                    candidates.append(label)
+                # CamelCase → spaced form, so `appleCheck` also tries
+                # "apple Check" which often matches the spoken form.
+                spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", label)
+                if spaced != label:
+                    candidates.append(spaced)
+                # File path's final segment — but only if it's unique to
+                # this module. Skips `index.js`-style shared file paths.
+                fp = (m.get("file_path") or "").rsplit("/", 1)[-1]
+                if fp and fp_counts.get(fp, 0) == 1:
+                    candidates.append(fp)
+
+                t: float | None = None
+                for phrase in candidates:
+                    if len(phrase.strip()) <= 2:
+                        continue
+                    cand = find_phrase_time(alignment, phrase)
+                    if cand is None:
+                        continue
+                    # If this exact timestamp is already taken by another
+                    # module, it's almost certainly a wrong match. Try
+                    # next candidate.
+                    cand_key = round(cand, 2)
+                    if cand_key in taken:
+                        continue
+                    t = cand
+                    break
+
                 if t is not None:
                     m["narration_start_seconds"] = round(t, 2)
                     module_times[m.get("id") or ""] = t
+                    taken.add(round(t, 2))
+                # Otherwise leave whatever Claude guessed — better than
+                # pinning to a wrong moment.
+
             # A connection lights up when its destination module is first
             # mentioned — that's the moment the narration "draws the arrow."
             for c in connections:
@@ -571,7 +696,7 @@ def sync_visuals_to_alignment(
                 if tgt in module_times:
                     c["narration_start_seconds"] = round(module_times[tgt], 2)
             logger.info(
-                "Sync architecture: %d/%d modules anchored to alignment data",
+                "Sync architecture: %d/%d modules anchored to alignment data (unique timestamps enforced)",
                 len(module_times), len(modules),
             )
 

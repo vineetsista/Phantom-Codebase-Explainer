@@ -109,6 +109,18 @@ want to mention isn't supported by something in `top_files` or
 `code_excerpt`, pick a different angle. Plausible-sounding code that
 doesn't appear verbatim in the input is forbidden output.
 
+NEVER WRITE URLS, LONG DOMAIN NAMES, OR DEEP FILE PATHS INTO NARRATION.
+These get read out loud character by character by the TTS and sound
+terrible. Specifically forbidden in spoken text:
+  - Full URLs (https://...)
+  - Domain names with three or more dots ("o-o.myaddr.l.google.com",
+    "api.fontshare.com")  → just say what the service IS ("Google's DNS",
+    "the fonts CDN")
+  - Deep file paths with multiple slashes ("src/services/foo/bar.js")
+    → use just the basename or the function name
+Short two-segment hosts that read as a single noun ("icanhazip dot com",
+"github dot com") are fine; anything longer is not.
+
 EXAMPLE — BAD vs GOOD, SAME REPO (sindresorhus/is-online):
 
 BAD intro narration:
