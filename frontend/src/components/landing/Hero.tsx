@@ -85,7 +85,7 @@ export function Hero() {
             className="mt-8 max-w-[560px] text-lg text-fog md:text-xl"
           >
             Drop a GitHub URL. Get a cinematic video walkthrough of any codebase
-            — architecture, key files, data flow, narrated by AI.
+            — architecture, key files, and design decisions, narrated by AI.
           </motion.p>
 
           <motion.form

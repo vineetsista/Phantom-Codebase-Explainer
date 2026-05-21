@@ -18,7 +18,7 @@ export const metadata: Metadata = {
     template: "%s · Phantom",
   },
   description:
-    "Drop a GitHub URL. Get a cinematic AI-generated video walkthrough — architecture, key files, data flow, narrated by AI.",
+    "Drop a GitHub URL. Get a cinematic AI-generated video walkthrough — architecture, key files, and design decisions, narrated by AI.",
   keywords: [
     "codebase explainer",
     "AI code walkthrough",
