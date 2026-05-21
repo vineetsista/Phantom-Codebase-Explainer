@@ -79,8 +79,14 @@ export function VideoPlayer({ src, poster, chapters = [], className }: VideoPlay
   const seek = useCallback((seconds: number) => {
     const video = videoRef.current;
     if (!video) return;
-    video.currentTime = Math.max(0, Math.min(video.duration || 0, seconds));
-  }, []);
+    // Use whichever duration is known. video.duration is the DOM truth once
+    // metadata loads; if it isn't available yet, fall back to React state.
+    const dur = isFinite(video.duration) && video.duration > 0
+      ? video.duration
+      : duration;
+    if (!dur) return;
+    video.currentTime = Math.max(0, Math.min(dur, seconds));
+  }, [duration]);
 
   const enterFullscreen = useCallback(() => {
     const container = containerRef.current;
@@ -236,18 +242,30 @@ export function VideoPlayer({ src, poster, chapters = [], className }: VideoPlay
         playsInline
       />
 
-      {/* Center play button overlay (only while paused) */}
+      {/* Center play button overlay (only while paused).
+          IMPORTANT: this is split into a non-interactive gradient layer + a
+          targeted button on top. The previous version made the entire
+          `inset-0` area an interactive `<button>`, which swallowed every
+          click on the timeline scrubber while the video was paused — the
+          user clicked the scrubber, the click hit this button instead,
+          togglePlay ran, and the video resumed from its current position
+          (looked like "the scrubber does nothing"). */}
       {!playing && !playError && (
-        <button
-          type="button"
-          aria-label="Play"
-          onClick={togglePlay}
-          className="absolute inset-0 grid place-items-center bg-gradient-to-b from-transparent via-transparent to-ink/40"
-        >
-          <span className="grid h-20 w-20 place-items-center rounded-full bg-electric/20 ring-1 ring-electric/50 backdrop-blur-xl transition-transform duration-300 ease-luxe group-hover:scale-105">
+        <>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-ink/40"
+          />
+          <button
+            type="button"
+            aria-label="Play"
+            onClick={togglePlay}
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-electric/20 ring-1 ring-electric/50 backdrop-blur-xl transition-transform duration-300 ease-luxe hover:scale-105"
+            style={{ width: 80, height: 80, display: "grid", placeItems: "center" }}
+          >
             <Play className="h-8 w-8 fill-electric text-electric" />
-          </span>
-        </button>
+          </button>
+        </>
       )}
 
       {/* Visible error overlay — replaces the silent failure mode where the
@@ -390,25 +408,46 @@ function Timeline({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [hoverPct, setHoverPct] = useState<number | null>(null);
+  const [dragging, setDragging] = useState(false);
   const percent = duration ? (time / duration) * 100 : 0;
 
-  function pctFromEvent(event: React.MouseEvent<HTMLDivElement>) {
+  function pctFromClientX(clientX: number): number | null {
     const el = ref.current;
     if (!el) return null;
     const rect = el.getBoundingClientRect();
-    return Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
   }
+
+  // Drag-to-scrub. Mousedown on the track starts dragging; mousemove
+  // anywhere updates the seek (so the user can drag past the track edge
+  // without losing the drag); mouseup ends it. Listeners are attached to
+  // `window` so leaving the timeline area doesn't drop the drag.
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: MouseEvent) => {
+      const p = pctFromClientX(e.clientX);
+      if (p !== null && duration) onSeek(p * duration);
+    };
+    const onUp = () => setDragging(false);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [dragging, duration, onSeek]);
 
   return (
     <div className="relative">
       <div
         ref={ref}
-        onClick={(event) => {
-          const p = pctFromEvent(event);
+        onMouseDown={(event) => {
+          const p = pctFromClientX(event.clientX);
           if (p !== null && duration) onSeek(p * duration);
+          setDragging(true);
         }}
         onMouseMove={(event) => {
-          const p = pctFromEvent(event);
+          const p = pctFromClientX(event.clientX);
           if (p !== null) setHoverPct(p);
         }}
         onMouseLeave={() => setHoverPct(null)}
