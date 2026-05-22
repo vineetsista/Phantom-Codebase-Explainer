@@ -603,6 +603,13 @@ def _generate_with_claude(analysis: AnalysisResult, api_key: str) -> dict[str, A
     except Exception as exc:
         logger.warning("Takeaway specificity pass failed: %s", exc)
 
+    # Hook slop scrub. The hook is a top-level field (not part of any
+    # section), so the per-section slop check below never sees it. AI tells
+    # like "under the hood" were leaking through to the most attention-grabby
+    # moment of the video. One inline regex sweep with explicit replacements
+    # for the most common offenders.
+    _scrub_hook_inline(parsed)
+
     # Up to 3 stop-slop / revision passes. Each pass is only invoked when
     # heuristics actually fire, so the typical job pays for at most one
     # extra model call. A pass that doesn't reduce the slop count gets
@@ -829,6 +836,33 @@ def _flag_sloppy_sections(parsed: dict[str, Any]) -> list[dict[str, Any]]:
             section_copy["_slop_hits"] = hits
             flagged.append(section_copy)
     return flagged
+
+
+def _scrub_hook_inline(parsed: dict[str, Any]) -> None:
+    """The hook is the first thing the viewer hears. It was getting AI-tell
+    phrases like 'under the hood' that the section-level slop check missed
+    (the hook is a top-level field, not part of any section). Do a single
+    targeted regex sweep over the hook with safe inline rewrites for the
+    most common offenders. Anything not in REPLACEMENTS just gets flagged
+    in logs so we know it slipped past."""
+    hook = parsed.get("hook") or ""
+    if not hook:
+        return
+    REPLACEMENTS: list[tuple[str, str]] = [
+        (r"\bunder the hood\b", "internally"),
+        (r"\bat its core\b", ""),
+        (r"\bin essence\b", ""),
+        (r"\bleverag(e|es|ing|ed)\b", "use"),
+        (r"\butiliz(e|es|ing|ed)\b", "use"),
+    ]
+    new_hook = hook
+    for pattern, replacement in REPLACEMENTS:
+        new_hook = re.sub(pattern, replacement, new_hook, flags=re.IGNORECASE)
+    new_hook = re.sub(r"\s{2,}", " ", new_hook).strip()
+    new_hook = re.sub(r"\s+([,.;])", r"\1", new_hook)
+    if new_hook != hook:
+        logger.info("Scrubbed hook: %r -> %r", hook[:80], new_hook[:80])
+        parsed["hook"] = new_hook
 
 
 def _revise_with_claude(
