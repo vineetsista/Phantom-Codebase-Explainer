@@ -620,6 +620,79 @@ def find_phrase_time(
         return None
 
 
+def _label_search_candidates(label: str, file_path: str = "") -> list[str]:
+    """Build a ranked list of phrases to try when looking for `label` in
+    alignment text. Ordered by specificity (most distinctive first).
+
+    Handles the v2 sync bugs:
+      - Parenthetical suffixes: "ZodType (base class)" → "ZodType"
+      - File extensions read aloud: "types.ts" → "types dot T S"
+      - CamelCase split: "fetchExtras" → "fetch Extras"
+      - Multi-word labels: "parse method" → also try "parse"
+      - dotted paths: "lib/utils.js" → "utils"
+    """
+    candidates: list[str] = []
+    if not label:
+        return candidates
+
+    # 1. Full label as-is (rare match for compound labels but kept for completeness)
+    candidates.append(label)
+
+    # 2. Strip parenthetical suffix — narrators rarely say "(base class)"
+    no_paren = re.sub(r"\s*\([^)]*\)\s*", "", label).strip()
+    if no_paren and no_paren != label:
+        candidates.append(no_paren)
+
+    base = no_paren or label
+
+    # 3. CamelCase split for the base
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", base)
+    if spaced != base:
+        candidates.append(spaced)
+
+    # 4. If base ends with a file extension, apply the TTS jargon expansion.
+    #    `_preprocess_narration` turns ".ts" into " dot T S" before sending to
+    #    ElevenLabs, so the alignment characters contain the spelled-out
+    #    version, not the original literal. Search for both.
+    ext_match = re.match(r"^(.+?)\.([a-zA-Z]{1,5})$", base)
+    if ext_match:
+        stem, ext = ext_match.group(1), ext_match.group(2)
+        # "types.ts" → search for "types dot T S" (uppercase spelled)
+        spelled = stem + " dot " + " ".join(ext.upper())
+        candidates.append(spelled)
+        # Also: just the stem alone if it's distinctive (>=4 chars).
+        if len(stem) >= 4:
+            candidates.append(stem)
+
+    # 5. Significant word from a multi-word label: "parse method" → "parse"
+    words = [w for w in re.split(r"\W+", base) if len(w) >= 4]
+    for w in words:
+        if w not in candidates and not any(w in c for c in candidates):
+            candidates.append(w)
+
+    # 6. File path basename as last-resort distinctive token
+    if file_path:
+        fp_base = file_path.rsplit("/", 1)[-1]
+        if fp_base and fp_base not in candidates:
+            # Apply same dot expansion
+            fp_match = re.match(r"^(.+?)\.([a-zA-Z]{1,5})$", fp_base)
+            if fp_match:
+                stem, ext = fp_match.group(1), fp_match.group(2)
+                if len(stem) >= 4 and stem not in candidates:
+                    candidates.append(stem)
+
+    # Dedup while preserving order, drop anything shorter than 3 chars.
+    seen: set[str] = set()
+    out: list[str] = []
+    for c in candidates:
+        c = c.strip()
+        if len(c) < 3 or c.lower() in seen:
+            continue
+        seen.add(c.lower())
+        out.append(c)
+    return out
+
+
 def sync_visuals_to_alignment(
     script: dict[str, Any], audio_files: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -653,53 +726,34 @@ def sync_visuals_to_alignment(
             connections = data.get("connections") or []
             module_times: dict[str, float] = {}
 
-            # First pass: try each module's distinctive search keys IN ORDER,
-            # collect the candidate timestamps. Each module's chosen anchor
-            # must be UNIQUE — once a timestamp is taken by one module,
-            # another module landing on the same timestamp is treated as
-            # "no match found" and stays unset. This eliminates the bug
-            # where `appleCheck` would fall back to its file_path
-            # "index.js" and match the very first occurrence (used by the
-            # actual index.js module).
             taken: set[float] = set()
-            # File paths shared by multiple modules can't be used as a
-            # disambiguating anchor — e.g. appleCheck and urlCheck both
-            # live in index.js. Don't even try the file_path fallback for
-            # those.
-            fp_counts: dict[str, int] = {}
-            for m in modules:
-                fp = (m.get("file_path") or "").rsplit("/", 1)[-1]
-                if fp:
-                    fp_counts[fp] = fp_counts.get(fp, 0) + 1
-
-            for m in modules:
+            for i, m in enumerate(modules):
                 label = (m.get("label") or m.get("id") or "").strip()
-                candidates: list[str] = []
-                if label:
-                    candidates.append(label)
-                # CamelCase → spaced form, so `appleCheck` also tries
-                # "apple Check" which often matches the spoken form.
-                spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", label)
-                if spaced != label:
-                    candidates.append(spaced)
-                # File path's final segment — but only if it's unique to
-                # this module. Skips `index.js`-style shared file paths.
-                fp = (m.get("file_path") or "").rsplit("/", 1)[-1]
-                if fp and fp_counts.get(fp, 0) == 1:
-                    candidates.append(fp)
+                file_path = m.get("file_path") or ""
+                candidates = _label_search_candidates(label, file_path)
 
+                # Each module must anchor to a UNIQUE timestamp (within 0.5s)
+                # — module A and module B can't both be 'first mentioned' at
+                # exactly the same moment. Look forward through alignment for
+                # the next un-taken match. Earlier modules in the list have
+                # priority (narration follows reading order).
                 t: float | None = None
                 for phrase in candidates:
-                    if len(phrase.strip()) <= 2:
+                    if len(phrase.strip()) < 3:
                         continue
                     cand = find_phrase_time(alignment, phrase)
                     if cand is None:
                         continue
-                    # If this exact timestamp is already taken by another
-                    # module, it's almost certainly a wrong match. Try
-                    # next candidate.
-                    cand_key = round(cand, 2)
-                    if cand_key in taken:
+                    # If a previously-anchored module sits within 0.5s of
+                    # this timestamp, assume this is the wrong match.
+                    if any(abs(cand - tk) < 0.5 for tk in taken):
+                        continue
+                    # Also: an anchor for module i shouldn't predate the
+                    # anchor for module i-1 by more than 2s (narration is
+                    # linear). Reject early-occurring matches that would
+                    # break module ordering.
+                    prior_max = max(taken) if taken else -10.0
+                    if cand < prior_max - 2.0:
                         continue
                     t = cand
                     break
@@ -708,8 +762,7 @@ def sync_visuals_to_alignment(
                     m["narration_start_seconds"] = round(t, 2)
                     module_times[m.get("id") or ""] = t
                     taken.add(round(t, 2))
-                # Otherwise leave whatever Claude guessed — better than
-                # pinning to a wrong moment.
+                # Otherwise leave for the fallback distribution below.
 
             # A connection lights up when its destination module is first
             # mentioned — that's the moment the narration "draws the arrow."
@@ -722,30 +775,66 @@ def sync_visuals_to_alignment(
                 len(module_times), len(modules),
             )
 
-            # Second sweep: dedupe Claude's pre-existing narration_start_seconds
-            # guesses among the modules that DIDN'T get an alignment anchor.
-            # If two unanchored modules guessed the same timestamp, push each
-            # subsequent collision later by 1.5s so they reveal sequentially
-            # rather than simultaneously. The user reported this exact bug
-            # (`fetch-extras` and `p-timeout` both at 16.0s).
-            already_used = set(round(v, 2) for v in module_times.values())
-            for m in modules:
+            # Fallback for unanchored modules: distribute them PROPORTIONALLY
+            # between the surrounding anchored modules. Narration is linear,
+            # so an unanchored module between anchored neighbours at t=4s and
+            # t=24s should land somewhere between them — not at whatever
+            # Claude originally guessed (which the user saw out of sync by
+            # 6-10 seconds in the zod render).
+            #
+            # Algorithm: scan modules in order. For each unanchored run,
+            # interpolate between the last anchored timestamp and the next
+            # anchored timestamp (or the audio end for trailing tails).
+            audio_dur = 0.0
+            for a in audio_files:
+                if a.get("section_id") == sid:
+                    audio_dur = float(a.get("audio_duration_seconds") or 0.0)
+                    break
+
+            anchored_idx = [i for i, m in enumerate(modules)
+                            if (m.get("id") or "") in module_times]
+
+            for i, m in enumerate(modules):
                 if (m.get("id") or "") in module_times:
-                    continue  # alignment-anchored, leave alone
-                guess = m.get("narration_start_seconds")
-                if guess is None:
                     continue
-                bumped = round(float(guess), 2)
-                # While the bumped value collides, push it later by 1.5s.
-                while bumped in already_used:
-                    bumped = round(bumped + 1.5, 2)
-                if bumped != round(float(guess), 2):
-                    logger.info(
-                        "Dedup architecture: %s %.2fs -> %.2fs (collision)",
-                        m.get("label"), guess, bumped,
-                    )
-                m["narration_start_seconds"] = bumped
-                already_used.add(bumped)
+                # Find surrounding anchored neighbours.
+                left = max((j for j in anchored_idx if j < i), default=None)
+                right = min((j for j in anchored_idx if j > i), default=None)
+
+                if left is None and right is None:
+                    # No anchors at all — fall back to even distribution
+                    # across the audio, leaving 0.5s at start/end.
+                    if audio_dur > 0 and len(modules) > 0:
+                        slot = (audio_dur - 1.0) / max(1, len(modules))
+                        interp = 0.5 + i * slot
+                    else:
+                        interp = float(m.get("narration_start_seconds") or i * 3.0)
+                elif left is None:
+                    # Module before the first anchor — slot evenly from 0 to it.
+                    right_t = float(modules[right]["narration_start_seconds"])
+                    gap_count = right + 1  # i==0..right share this range
+                    interp = right_t * (i + 1) / max(1, gap_count + 1)
+                elif right is None:
+                    # Module after the last anchor — slot evenly from it
+                    # to the audio end.
+                    left_t = float(modules[left]["narration_start_seconds"])
+                    end_t = audio_dur or (left_t + (len(modules) - left) * 3.0)
+                    gap_count = len(modules) - left  # i==left+1..end
+                    fraction = (i - left) / max(1, gap_count)
+                    interp = left_t + (end_t - left_t) * fraction
+                else:
+                    left_t = float(modules[left]["narration_start_seconds"])
+                    right_t = float(modules[right]["narration_start_seconds"])
+                    gap_count = right - left
+                    fraction = (i - left) / max(1, gap_count)
+                    interp = left_t + (right_t - left_t) * fraction
+
+                interp = round(max(0.0, interp), 2)
+                logger.info(
+                    "Architecture fallback: %s narration_start %s -> %.2fs (interpolated)",
+                    m.get("label"), m.get("narration_start_seconds"), interp,
+                )
+                m["narration_start_seconds"] = interp
 
         elif sid == "code_walkthrough":
             highlights = data.get("highlights") or []
