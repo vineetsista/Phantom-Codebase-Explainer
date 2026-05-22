@@ -100,15 +100,13 @@ _JARGON: dict[str, str] = {
     "HTML": "H T M L",
     "HTTP": "H T T P",     # otherwise read as "h-t-t-p" with awkward break
     "HTTPS": "H T T P S",  # user reported pause mid-word; force consistent spell
-    # When Claude writes file extensions in narration (".ts", ".js") the
-    # preprocessor still turns them into " dot T S" etc. for the TTS, which
-    # sounds like a person reading a path. The narration prompt now
-    # forbids those — but if they slip in, the audio is at least
-    # consistent.
-    "TS": "T S",
-    "JS": "J S",
-    "TSX": "T S X",
-    "JSX": "J S X",
+    # NOTE — formerly forced TS/JS/TSX/JSX to letter-by-letter spelling.
+    # Removed: ElevenLabs reads "utils.js" natively with a brief pause
+    # at the dot, which sounds more natural than the forced "dot T S"
+    # expansion the user flagged as robotic. Standalone "TS" / "JS" as
+    # bare tokens in narration is rare; if encountered they'll read as
+    # plain words ("tiss" / "jiss") and Claude usually inflects them
+    # as "TypeScript" / "JavaScript" anyway.
     "TypeScript": "TypeScript",  # explicit so dictionary lookups don't truncate
     "ESM": "E S M",
     "CommonJS": "common J S",
@@ -229,6 +227,31 @@ def _scrub_unspeakable(text: str) -> str:
         r"\b(?:[A-Za-z0-9_\-]+/){2,}([A-Za-z0-9_\-]+\.[A-Za-z]{1,5})\b",
         r"\1",
         text,
+    )
+
+    # File paths with ONE slash: also reduce to basename. "lib/utils.js"
+    # was getting read as "lib slash utils dot J S". Just the basename
+    # sounds normal: "utils.js" → "utils dot js" (with natural pause).
+    text = re.sub(
+        r"\b[A-Za-z0-9_\-]+/([A-Za-z0-9_\-]+\.[A-Za-z]{1,5})\b",
+        r"\1",
+        text,
+    )
+
+    # Standalone file extensions in narration: when Claude writes
+    # "the index.js file" or "lib/utils.js", the ".js" / ".ts" / ".tsx"
+    # / ".jsx" / ".py" / ".rs" / ".go" extensions get read as "dot J S"
+    # etc. — robotic. Two strategies:
+    #  - In flowing prose ("the index.js file"), drop the extension:
+    #    "the index file". The article + "file" preserves meaning.
+    #  - When the extension would be load-bearing for understanding
+    #    (rare in narration; usually it's just a name reference), this
+    #    is acceptable loss for naturalness.
+    text = re.sub(
+        r"\b([A-Za-z_][A-Za-z0-9_\-]+)\.(?:ts|tsx|js|jsx|mjs|cjs|py|rs|go|rb|java|kt|scala|cs|swift|m|cpp|hpp|c|h)\b",
+        r"\1",
+        text,
+        flags=re.IGNORECASE,
     )
 
     # Clean up orphan commas and double spaces left behind.
@@ -692,19 +715,24 @@ def _label_search_candidates(label: str, file_path: str = "") -> list[str]:
     if spaced != base:
         candidates.append(spaced)
 
-    # 4. If base ends with a file extension, apply the TTS jargon expansion.
-    #    `_preprocess_narration` turns ".ts" into " dot T S" before sending to
-    #    ElevenLabs, so the alignment characters contain the spelled-out
-    #    version, not the original literal. Search for both.
+    # 4. File-extension handling. As of v5, voice_generator strips file
+    #    extensions from narration before sending to TTS, so "utils.js"
+    #    appears in alignment text as just "utils". Try basename
+    #    variants in this order:
+    #      - bare stem ("utils") — what's actually spoken
+    #      - stem with "dot ext" spelling (legacy, kept for old renders)
     ext_match = re.match(r"^(.+?)\.([a-zA-Z]{1,5})$", base)
     if ext_match:
-        stem, ext = ext_match.group(1), ext_match.group(2)
-        # "types.ts" → search for "types dot T S" (uppercase spelled)
-        spelled = stem + " dot " + " ".join(ext.upper())
-        candidates.append(spelled)
-        # Also: just the stem alone if it's distinctive (>=4 chars).
-        if len(stem) >= 4:
-            candidates.append(stem)
+        stem_full, ext = ext_match.group(1), ext_match.group(2)
+        # If stem has a slash (label="lib/utils.js" → stem="lib/utils"),
+        # the basename is what matters.
+        stem_base = stem_full.rsplit("/", 1)[-1] if "/" in stem_full else stem_full
+        if len(stem_base) >= 4 and stem_base not in candidates:
+            candidates.append(stem_base)
+        # Legacy "dot T S" spelling — kept for backwards compatibility.
+        spelled = stem_full + " dot " + " ".join(ext.upper())
+        if spelled not in candidates:
+            candidates.append(spelled)
 
     # 5. Significant word from a multi-word label: "parse method" → "parse"
     words = [w for w in re.split(r"\W+", base) if len(w) >= 4]
@@ -898,6 +926,55 @@ def sync_visuals_to_alignment(
                     m["narration_start_seconds"] = t
                 prev_t = t
 
+            # TAIL-CLUSTER DETECTION. Even with everything above, alignment can
+            # produce a configuration where several adjacent modules cluster
+            # within a tight window — most often near the end of the audio,
+            # where the narrator runs through a quick list of dependencies in
+            # a couple seconds. The v4 express render had modules 4-7
+            # (request.js, response.js, utils.js, view.js) all anchored
+            # between 18-23s of 52s audio, while modules 1-3 spread across
+            # 0-7s, leaving a dead zone from 7-18s with nothing happening.
+            #
+            # Detection: any consecutive run of 3+ modules whose end-to-end
+            # spread is less than (audio_dur / module_count * 0.6) is a
+            # cluster. Fix: redistribute that cluster across a wider span by
+            # respacing them at (avg_slot * 0.8) intervals starting from
+            # the cluster's earliest member.
+            if audio_dur > 0 and len(modules) >= 4:
+                avg_slot = audio_dur / max(1, len(modules))
+                # Scan for cluster runs (3+ modules within tight spread).
+                i = 0
+                while i < len(modules) - 2:
+                    j = i
+                    while (
+                        j + 1 < len(modules)
+                        and float(modules[j + 1].get("narration_start_seconds") or 0)
+                            - float(modules[i].get("narration_start_seconds") or 0)
+                            < avg_slot * 0.6 * (j + 1 - i)
+                    ):
+                        j += 1
+                    run_len = j - i + 1
+                    if run_len >= 3:
+                        start_t = float(modules[i].get("narration_start_seconds") or 0)
+                        end_t = float(modules[j].get("narration_start_seconds") or 0)
+                        # Goal spread: at least avg_slot * 0.8 between consecutive.
+                        # Compute new end bounded by audio_dur - 0.5.
+                        target_spread = (run_len - 1) * avg_slot * 0.85
+                        target_end = min(audio_dur - 0.5, start_t + target_spread)
+                        if target_end > end_t + 1.0:
+                            step = (target_end - start_t) / max(1, run_len - 1)
+                            old = [float(modules[k].get("narration_start_seconds") or 0) for k in range(i, j + 1)]
+                            for k in range(i, j + 1):
+                                modules[k]["narration_start_seconds"] = round(
+                                    start_t + (k - i) * step, 2
+                                )
+                            new = [float(modules[k]["narration_start_seconds"]) for k in range(i, j + 1)]
+                            logger.info(
+                                "Tail-cluster redistribute: modules %d-%d %s -> %s (audio=%.1fs)",
+                                i, j, old, new, audio_dur,
+                            )
+                    i = j + 1
+
         elif sid == "code_walkthrough":
             highlights = data.get("highlights") or []
             anchored: dict[int, float] = {}  # index -> timestamp
@@ -1052,6 +1129,42 @@ def sync_visuals_to_alignment(
                     t = round(prev_t + 0.5, 2)
                     h["narration_start_seconds"] = t
                 prev_t = t
+
+            # TAIL-CLUSTER DETECTION for highlights — same algorithm as
+            # the architecture scene above. If 3+ consecutive highlights
+            # land within a tight window, redistribute them across more
+            # of the audio.
+            if audio_dur_c > 0 and len(highlights) >= 3:
+                avg_slot_c = audio_dur_c / max(1, len(highlights))
+                i = 0
+                while i < len(highlights) - 2:
+                    j = i
+                    while (
+                        j + 1 < len(highlights)
+                        and float(highlights[j + 1].get("narration_start_seconds") or 0)
+                            - float(highlights[i].get("narration_start_seconds") or 0)
+                            < avg_slot_c * 0.6 * (j + 1 - i)
+                    ):
+                        j += 1
+                    run_len = j - i + 1
+                    if run_len >= 3:
+                        start_t = float(highlights[i].get("narration_start_seconds") or 0)
+                        target_spread = (run_len - 1) * avg_slot_c * 0.85
+                        target_end = min(audio_dur_c - 0.5, start_t + target_spread)
+                        end_t = float(highlights[j].get("narration_start_seconds") or 0)
+                        if target_end > end_t + 1.0:
+                            step = (target_end - start_t) / max(1, run_len - 1)
+                            old = [float(highlights[k].get("narration_start_seconds") or 0) for k in range(i, j + 1)]
+                            for k in range(i, j + 1):
+                                highlights[k]["narration_start_seconds"] = round(
+                                    start_t + (k - i) * step, 2
+                                )
+                            new = [float(highlights[k]["narration_start_seconds"]) for k in range(i, j + 1)]
+                            logger.info(
+                                "Tail-cluster redistribute (highlights): %d-%d %s -> %s",
+                                i, j, old, new,
+                            )
+                    i = j + 1
 
             logger.info(
                 "Sync code_walkthrough: %d/%d highlights anchored to alignment data",

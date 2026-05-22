@@ -73,10 +73,30 @@ Your job is to produce a script that makes a developer feel they understand the 
 
 Rules for your output:
 
-1. OPEN WITH A CONCRETE HOOK rooted in what THIS repo teaches.
-   Not "Welcome to..." Not "Today we'll explore..." Lead with the
-   technical question the library is answering or the pattern it
-   demonstrates. Inform, don't accuse other tools.
+1. OPEN WITH A SHARP HOOK. Your hook is the first 8 seconds of the
+   video. By the end of it, the viewer should be thinking "huh, I want
+   to know more." Generic descriptive openers ("X is a library for…")
+   are out. Required: every hook must do at least one of three things:
+
+   (a) Quantify. A number that makes the repo concrete:
+       "Express has 69,000 stars and was written before async/await
+       existed."
+
+   (b) Contrast. Set this repo against the obvious alternative:
+       "Most schema validators force you to write validation logic,
+       then duplicate it as TypeScript types. Zod inverts that."
+
+   (c) Contradict. State a thing that sounds wrong but isn't:
+       "The native fetch API has no built-in retry logic, no hooks,
+       and no real timeout support. Ky wraps it in 13 kilobytes
+       without pulling in a single dependency."
+
+   Vague descriptive hooks ("This library handles HTTP requests
+   elegantly", "Zod is a TypeScript-first schema validator") are
+   FORBIDDEN. If the only way you can hook the viewer is by repeating
+   the README's first sentence, the repo isn't interesting enough —
+   find the interesting thing in `key_files` or `why_comments` and
+   lead with that instead.
 
    AVOID harsh / accusatory hooks ("X lies", "X is broken", "X is
    wrong"). These read as opinions, not teaching. Reframe them as

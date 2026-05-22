@@ -309,18 +309,22 @@ const ModuleCard: React.FC<ModuleCardProps> = ({
   translateX,
   isActive,
 }) => {
+  const { width, height } = useVideoConfig();
   const label = module.label || module.name || module.id || "Module";
   const filePath = module.file_path || "";
   const description = module.description || "";
 
-  const cardWidth = 1280;
-  const cardHeight = 540;
+  // Card sized proportionally to viewport. ~67% of width / 75% of height
+  // — leaves visual breathing room on all sides.
+  const cardWidth = Math.round(width * 0.67);
+  const cardHeight = Math.round(height * 0.5);
+  const cardTopPct = 0.32;
 
   return (
     <div
       style={{
         position: "absolute",
-        top: 230,
+        top: Math.round(height * cardTopPct),
         left: "50%",
         marginLeft: -cardWidth / 2,
         width: cardWidth,
@@ -362,7 +366,8 @@ const ModuleCard: React.FC<ModuleCardProps> = ({
         <div
           style={{
             fontFamily: FONT_DISPLAY,
-            fontSize: 84,
+            // Scale font with card width — 84px at 1920 → ~56px at 1280
+            fontSize: Math.round(cardWidth * 0.066),
             fontWeight: 700,
             color: COLORS.text,
             lineHeight: 1.0,
@@ -396,11 +401,12 @@ const ModuleCard: React.FC<ModuleCardProps> = ({
             style={{
               marginTop: 44,
               fontFamily: FONT_BODY,
-              fontSize: 28,
+              // Scale description text with card width too.
+              fontSize: Math.round(cardWidth * 0.022),
               color: COLORS.text,
               lineHeight: 1.5,
               textAlign: "center",
-              maxWidth: 1100,
+              maxWidth: Math.round(cardWidth * 0.85),
               marginLeft: "auto",
               marginRight: "auto",
               fontWeight: 400,

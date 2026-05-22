@@ -43,14 +43,17 @@ const EDITOR_PAD_LEFT = 36;
 // even on the longest lines.
 const EDITOR_PAD_RIGHT = 24;
 const TITLE_BAR_HEIGHT = 44;
-// Right inset is generous so annotation cards (up to 300px wide + 36px
-// gutter) always have room beside the editor panel without overflowing
-// the composition. Left + bottom inset stay reasonable.
-const PANEL_INSET = {
-  left: 140,
-  right: 380,
-  top: 250,
-  bottom: 130,
+// PANEL_INSET in PERCENTAGES of viewport, not fixed pixels. Previous
+// fixed values (140/380/250/130) were tuned for 1920x1080. On 1280x720
+// those numbers shrank the code panel to ~58% of width and pushed it
+// hard to the left. Percent-based insets keep the layout proportional
+// across resolutions. Resolved to pixels inside the component via
+// useVideoConfig().
+const PANEL_INSET_PCT = {
+  left: 0.07,   // ~90px @ 1280, ~134px @ 1920
+  right: 0.20,  // 256px @ 1280, 384px @ 1920 — leaves room for annotation card
+  top: 0.28,    // 200px @ 720,  300px @ 1080
+  bottom: 0.18, // 130px @ 720,  194px @ 1080
 };
 
 const PALETTE = {
@@ -279,6 +282,13 @@ export const CodeWalkthroughScene: React.FC<{ section: ScriptSection }> = ({
   // Left panel shrinks; right panel slides in.
   const leftPanelWidthPct = crossRef ? 50 + (1 - xrefProgress) * 50 : 100;
 
+  // Resolve percentage-based insets to pixels for this resolution.
+  const PANEL_INSET = {
+    left: Math.round(width * PANEL_INSET_PCT.left),
+    right: Math.round(width * PANEL_INSET_PCT.right),
+    top: Math.round(height * PANEL_INSET_PCT.top),
+    bottom: Math.round(height * PANEL_INSET_PCT.bottom),
+  };
   const panelWidth = width - PANEL_INSET.left - PANEL_INSET.right;
   const panelHeight = height - PANEL_INSET.top - PANEL_INSET.bottom;
 

@@ -287,6 +287,11 @@ def _render_with_remotion(
     # explicitly on the CLI is the durable fix.
     public_dir = (Path(remotion_dir).parent / "public").resolve()
 
+    # Concurrency tuned for parallel Chromium workers — 4 tabs render
+    # different frame ranges simultaneously. On a 4+ core host this
+    # ~halves wall-clock render time. Increase if more cores available.
+    import os
+    concurrency = max(2, min(4, os.cpu_count() or 2))
     cmd = [
         "npx",
         "remotion",
@@ -298,13 +303,19 @@ def _render_with_remotion(
         f"--public-dir={public_dir}",
         "--codec=h264",
         "--image-format=jpeg",
+        f"--concurrency={concurrency}",
+        # JPEG quality 70 (default ~80) — visually identical for the
+        # text-heavy code panels but ~25% faster per frame to encode.
+        "--jpeg-quality=70",
         "--log=warn",
     ]
     logger.info("Running Remotion render: %s", " ".join(cmd))
     proc = subprocess.run(
         cmd,
         cwd=remotion_dir,
-        timeout=900,
+        # 28-min budget (up from 15) so we have headroom for longer
+        # videos even at the new concurrency level.
+        timeout=28 * 60,
         capture_output=True,
         text=True,
     )
