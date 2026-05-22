@@ -160,6 +160,8 @@ class AnalysisResult:
     readme_excerpt: str = ""
     code_excerpt: dict[str, Any] = field(default_factory=dict)
     monorepo: Optional[dict] = None
+    interesting_observations: list[str] = field(default_factory=list)
+    personality_traits: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -176,6 +178,8 @@ class AnalysisResult:
             "readme_excerpt": self.readme_excerpt,
             "code_excerpt": self.code_excerpt,
             "monorepo": self.monorepo,
+            "interesting_observations": self.interesting_observations,
+            "personality_traits": self.personality_traits,
         }
 
     @property
@@ -560,6 +564,12 @@ def _scan_source_root(
     # internal structure to show.
     modules = _enrich_with_subdirs(source_root, modules)
     code_excerpt = _read_code_excerpt(source_root, top_files, walkthrough_path)
+    interesting_observations = _detect_observations(
+        source_root, top_files, config_files, languages_pct
+    )
+    personality_traits = _detect_personality(
+        metadata, config_files, languages_pct, len(source_files)
+    )
 
     return AnalysisResult(
         repo={
@@ -586,7 +596,142 @@ def _scan_source_root(
         readme_excerpt=readme_excerpt,
         code_excerpt=code_excerpt,
         monorepo=monorepo_info,
+        interesting_observations=interesting_observations,
+        personality_traits=personality_traits,
     )
+
+
+def _detect_observations(
+    source_root: Path,
+    top_files: list[dict],
+    config_files: dict[str, str],
+    languages_pct: dict[str, float],
+) -> list[str]:
+    """Surface non-obvious facts about the repo that the script generator can
+    reference. Each observation is one sentence, grounded in real evidence."""
+    observations: list[str] = []
+
+    # Check TypeScript strict mode.
+    tsconfig = config_files.get("tsconfig.json", "")
+    if tsconfig:
+        if '"strict": true' in tsconfig or '"strict":true' in tsconfig:
+            observations.append("TypeScript strict mode is on.")
+        any_count = tsconfig.count('": any')
+        if "noImplicitAny" in tsconfig and ("false" in tsconfig.split("noImplicitAny", 1)[-1][:30]):
+            observations.append("noImplicitAny is disabled — lots of escape hatches.")
+
+    # Test framework presence.
+    pkg_text = config_files.get("package.json", "")
+    if pkg_text:
+        try:
+            pkg = json.loads(pkg_text)
+            deps = {**(pkg.get("dependencies") or {}), **(pkg.get("devDependencies") or {})}
+            if "vitest" in deps:
+                observations.append("Tests run on Vitest.")
+            elif "jest" in deps:
+                observations.append("Tests run on Jest.")
+            elif "mocha" in deps:
+                observations.append("Tests run on Mocha.")
+            elif "ava" in deps:
+                observations.append("Tests run on AVA.")
+            # Modern build tools tell you about the project's era.
+            if "tsup" in deps:
+                observations.append("Built with tsup (esbuild under the hood).")
+            elif "esbuild" in deps:
+                observations.append("Bundled with esbuild.")
+            elif "rollup" in deps:
+                observations.append("Bundled with Rollup.")
+            # Notable runtime deps to surface.
+            # Skip self-references (a package listing itself for testing).
+            self_name = (pkg.get("name") or "").rsplit("/", 1)[-1].lower()
+            interesting_deps = [
+                d for d in ("p-any", "p-timeout", "p-throttle", "p-limit",
+                            "p-map", "p-queue", "p-retry", "got", "ky",
+                            "ofetch", "undici", "zod", "valibot", "drizzle-orm",
+                            "prisma", "tsoa")
+                if d in deps and d.lower() != self_name
+            ]
+            if interesting_deps:
+                observations.append(
+                    f"Pulls in {', '.join(interesting_deps[:3])} — composition over reimplementation."
+                )
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Top-file size shape.
+    if top_files:
+        biggest = top_files[0]
+        if biggest.get("bytes", 0) > 30_000:
+            observations.append(
+                f"Most of the logic concentrates in {biggest['path']} ({biggest['bytes'] // 1024} KB)."
+            )
+
+    # Language profile.
+    if len(languages_pct) == 1:
+        only_lang = next(iter(languages_pct))
+        observations.append(f"Single-language repo — {only_lang} only.")
+    elif "TypeScript" in languages_pct and languages_pct.get("TypeScript", 0) > 90:
+        observations.append("Almost entirely TypeScript — types are load-bearing here.")
+
+    return observations[:6]
+
+
+def _detect_personality(
+    metadata: RepoMetadata,
+    config_files: dict[str, str],
+    languages_pct: dict[str, float],
+    source_file_count: int,
+) -> list[str]:
+    """High-level personality traits — battle-tested vs fresh, opinionated vs
+    flexible, minimal vs framework-y. Each trait is a 1-3 word tag the script
+    generator can reach for when picking tone."""
+    traits: list[str] = []
+
+    # Size shape
+    if source_file_count <= 5:
+        traits.append("minimal")
+    elif source_file_count <= 30:
+        traits.append("small")
+    elif source_file_count >= 200:
+        traits.append("framework-scale")
+
+    # Stars / age signals
+    if metadata.stars >= 10000:
+        traits.append("battle-tested")
+    elif metadata.stars >= 1000:
+        traits.append("well-known")
+
+    if metadata.created_at and metadata.created_at[:4].isdigit():
+        from datetime import datetime, timezone
+        try:
+            year = int(metadata.created_at[:4])
+            now_year = datetime.now(timezone.utc).year
+            if now_year - year >= 8:
+                traits.append("mature")
+            elif now_year - year <= 2:
+                traits.append("recent")
+        except ValueError:
+            pass
+
+    # Typing rigor
+    tsconfig = config_files.get("tsconfig.json", "")
+    if '"strict": true' in tsconfig or '"strict":true' in tsconfig:
+        traits.append("strongly-typed")
+
+    # Maintenance signal — if pushed_at is recent (< 90 days)
+    if metadata.pushed_at and metadata.pushed_at[:4].isdigit():
+        from datetime import datetime, timezone
+        try:
+            pushed = datetime.fromisoformat(metadata.pushed_at.replace("Z", "+00:00"))
+            delta = (datetime.now(timezone.utc) - pushed).days
+            if delta < 90:
+                traits.append("active")
+            elif delta > 365:
+                traits.append("maintenance-mode")
+        except (ValueError, TypeError):
+            pass
+
+    return traits[:5]
 
 
 def _is_test_file(path: str) -> bool:
