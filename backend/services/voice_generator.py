@@ -722,6 +722,31 @@ def sync_visuals_to_alignment(
                 len(module_times), len(modules),
             )
 
+            # Second sweep: dedupe Claude's pre-existing narration_start_seconds
+            # guesses among the modules that DIDN'T get an alignment anchor.
+            # If two unanchored modules guessed the same timestamp, push each
+            # subsequent collision later by 1.5s so they reveal sequentially
+            # rather than simultaneously. The user reported this exact bug
+            # (`fetch-extras` and `p-timeout` both at 16.0s).
+            already_used = set(round(v, 2) for v in module_times.values())
+            for m in modules:
+                if (m.get("id") or "") in module_times:
+                    continue  # alignment-anchored, leave alone
+                guess = m.get("narration_start_seconds")
+                if guess is None:
+                    continue
+                bumped = round(float(guess), 2)
+                # While the bumped value collides, push it later by 1.5s.
+                while bumped in already_used:
+                    bumped = round(bumped + 1.5, 2)
+                if bumped != round(float(guess), 2):
+                    logger.info(
+                        "Dedup architecture: %s %.2fs -> %.2fs (collision)",
+                        m.get("label"), guess, bumped,
+                    )
+                m["narration_start_seconds"] = bumped
+                already_used.add(bumped)
+
         elif sid == "code_walkthrough":
             highlights = data.get("highlights") or []
             anchored = 0
