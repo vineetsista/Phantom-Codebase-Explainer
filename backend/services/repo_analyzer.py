@@ -162,6 +162,12 @@ class AnalysisResult:
     monorepo: Optional[dict] = None
     interesting_observations: list[str] = field(default_factory=list)
     personality_traits: list[str] = field(default_factory=list)
+    # v4 fields — deep evidence for the script generator.
+    key_files: list[dict] = field(default_factory=list)
+    why_comments: list[dict] = field(default_factory=list)
+    changelog_excerpt: str = ""
+    readme_key_paragraphs: list[str] = field(default_factory=list)
+    exports_index: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -180,6 +186,11 @@ class AnalysisResult:
             "monorepo": self.monorepo,
             "interesting_observations": self.interesting_observations,
             "personality_traits": self.personality_traits,
+            "key_files": self.key_files,
+            "why_comments": self.why_comments,
+            "changelog_excerpt": self.changelog_excerpt,
+            "readme_key_paragraphs": self.readme_key_paragraphs,
+            "exports_index": self.exports_index,
         }
 
     @property
@@ -559,9 +570,6 @@ def _scan_source_root(
 
     architecture_hint = _guess_architecture(repo_root, config_files, directories)
     modules = _extract_modules(source_root, directories, config_files)
-    # If the surface-level module list is too shallow (one umbrella src/),
-    # drill into its subdirectories so the architecture scene has real
-    # internal structure to show.
     modules = _enrich_with_subdirs(source_root, modules)
     code_excerpt = _read_code_excerpt(source_root, top_files, walkthrough_path)
     interesting_observations = _detect_observations(
@@ -570,6 +578,12 @@ def _scan_source_root(
     personality_traits = _detect_personality(
         metadata, config_files, languages_pct, len(source_files)
     )
+    # v4 — deep evidence for the script generator
+    key_files = _extract_key_files(source_root, top_files, source_files)
+    why_comments = _extract_why_comments(key_files)
+    changelog_excerpt = _read_changelog(repo_root)
+    readme_key_paragraphs = _extract_readme_paragraphs(readme_excerpt)
+    exports_index = _build_exports_index(key_files)
 
     return AnalysisResult(
         repo={
@@ -598,6 +612,11 @@ def _scan_source_root(
         monorepo=monorepo_info,
         interesting_observations=interesting_observations,
         personality_traits=personality_traits,
+        key_files=key_files,
+        why_comments=why_comments,
+        changelog_excerpt=changelog_excerpt,
+        readme_key_paragraphs=readme_key_paragraphs,
+        exports_index=exports_index,
     )
 
 
@@ -744,6 +763,8 @@ def _is_test_file(path: str) -> bool:
     if lower.startswith(("test/", "tests/", "__tests__/", "spec/", "e2e/", "benchmark/")):
         return True
     base = path.rsplit("/", 1)[-1].lower()
+    if base in {"test.js", "test.ts", "tests.js", "tests.ts", "spec.js", "spec.ts"}:
+        return True
     return (
         base.endswith(".test.ts") or base.endswith(".test.tsx")
         or base.endswith(".test.js") or base.endswith(".test.jsx")
@@ -1218,3 +1239,263 @@ def mock_analysis(repo_url: str) -> AnalysisResult:
         },
         monorepo=None,
     )
+
+
+# ===========================================================================
+# v4 deep-evidence extraction
+# ===========================================================================
+#
+# The v3 analyzer fed Claude one file's 80-line excerpt plus a few flat
+# observations. Claude could only write surface-level paraphrase because it
+# never saw the *substance* of the code — function bodies, the comments
+# that explained tradeoffs, the README paragraphs that motivated design
+# choices.
+#
+# v4 extracts the evidence Claude needs to write narration that beats
+# reading the README: full content of the most-imported files, every
+# exported symbol with its signature, "why" comments that surface intent,
+# the CHANGELOG, and the substantive paragraphs from the README.
+
+KEY_FILES_MAX = 5
+KEY_FILE_MAX_LINES = 400  # full content for the most important file
+KEY_FILE_SECONDARY_LINES = 200  # smaller window for supporting files
+
+
+def _extract_key_files(
+    source_root: Path,
+    top_files: list[dict],
+    source_files_summary: list[FileSummary],
+) -> list[dict]:
+    """Read FULL CONTENT of up to KEY_FILES_MAX top source files. Each
+    entry includes the code body (capped per file), the file's exports
+    with line numbers and signatures, and the file's in-degree (how
+    many other top files import it)."""
+    out: list[dict] = []
+    # Candidate set: top files filtered to real source (already done in
+    # _order_top_files). Skip generated / lock / typedef.
+    candidates = [
+        f for f in top_files
+        if not _looks_generated(f.get("path", ""))
+        and not _is_test_file(f.get("path", ""))
+        and not _is_example_or_doc_file(f.get("path", ""))
+        and not _is_type_only_file(f.get("path", ""))
+    ][:KEY_FILES_MAX]
+
+    for i, entry in enumerate(candidates):
+        path = entry.get("path", "")
+        if not path:
+            continue
+        absolute = source_root / path
+        if not absolute.is_file():
+            continue
+        try:
+            text = absolute.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+
+        max_lines = KEY_FILE_MAX_LINES if i == 0 else KEY_FILE_SECONDARY_LINES
+        raw_lines = text.splitlines()[:max_lines]
+        # Truncate long lines like the regular excerpt does so the code
+        # panel can display them later if needed.
+        lines = [_truncate_line(ln) for ln in raw_lines]
+        code = "\n".join(lines)
+
+        # In-degree: how many of the OTHER candidate files reference this
+        # file's basename (cheap import detection — full AST is overkill).
+        in_degree = _count_imports_to(
+            source_root, source_files_summary[:30], path
+        )
+
+        exports = _extract_exports(path, text, entry.get("language", ""))
+
+        out.append({
+            "path": path,
+            "language": entry.get("language", ""),
+            "code": code,
+            "line_count": len(lines),
+            "truncated": len(text.splitlines()) > max_lines,
+            "in_degree": in_degree,
+            "exports": exports,
+        })
+    return out
+
+
+# Regexes to pull exports from common languages. We're not trying to be a
+# parser — just to surface the names + line numbers Claude can reference.
+_EXPORT_PATTERNS: dict[str, list[tuple[str, re.Pattern]]] = {
+    "TypeScript": [
+        ("class",     re.compile(r"^\s*export\s+(?:default\s+)?(?:abstract\s+)?class\s+([A-Z][A-Za-z0-9_]*)")),
+        ("interface", re.compile(r"^\s*export\s+(?:default\s+)?interface\s+([A-Z][A-Za-z0-9_]*)")),
+        ("type",      re.compile(r"^\s*export\s+(?:default\s+)?type\s+([A-Za-z_][A-Za-z0-9_]*)")),
+        ("enum",      re.compile(r"^\s*export\s+(?:default\s+)?enum\s+([A-Za-z_][A-Za-z0-9_]*)")),
+        ("function",  re.compile(r"^\s*export\s+(?:default\s+)?(?:async\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*)")),
+        ("const",     re.compile(r"^\s*export\s+(?:default\s+)?const\s+([A-Za-z_][A-Za-z0-9_]*)")),
+    ],
+    "JavaScript": [
+        ("class",     re.compile(r"^\s*export\s+(?:default\s+)?class\s+([A-Z][A-Za-z0-9_]*)")),
+        ("function",  re.compile(r"^\s*export\s+(?:default\s+)?(?:async\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*)")),
+        ("const",     re.compile(r"^\s*export\s+(?:default\s+)?const\s+([A-Za-z_][A-Za-z0-9_]*)")),
+        # CommonJS: module.exports.foo = ...
+        ("export",    re.compile(r"^\s*(?:module\.)?exports\.([A-Za-z_][A-Za-z0-9_]*)\s*=")),
+        ("export",    re.compile(r"^\s*exports\s*=\s*\{")),
+    ],
+    "Python": [
+        ("function",  re.compile(r"^def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")),
+        ("class",     re.compile(r"^class\s+([A-Z][A-Za-z0-9_]*)")),
+    ],
+    "Go": [
+        ("function",  re.compile(r"^func\s+(?:\(\s*\w+\s+\*?\w+\s*\)\s*)?([A-Z][A-Za-z0-9_]*)\s*\(")),
+        ("type",      re.compile(r"^type\s+([A-Z][A-Za-z0-9_]*)")),
+    ],
+    "Rust": [
+        ("function",  re.compile(r"^pub\s+(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*[<(]")),
+        ("struct",    re.compile(r"^pub\s+struct\s+([A-Z][A-Za-z0-9_]*)")),
+        ("enum",      re.compile(r"^pub\s+enum\s+([A-Z][A-Za-z0-9_]*)")),
+        ("trait",     re.compile(r"^pub\s+trait\s+([A-Z][A-Za-z0-9_]*)")),
+    ],
+}
+
+
+def _extract_exports(path: str, text: str, language: str) -> list[dict]:
+    """Pull exported symbols out of a source file via regex. Returns a
+    list of {name, kind, line, signature} dicts — `signature` is the
+    full text of the declaration line, truncated to 100 chars."""
+    patterns = _EXPORT_PATTERNS.get(language, [])
+    if not patterns:
+        return []
+    out: list[dict] = []
+    seen: set[tuple[str, int]] = set()
+    for i, line in enumerate(text.splitlines(), start=1):
+        for kind, pattern in patterns:
+            m = pattern.match(line)
+            if not m:
+                continue
+            name = m.group(1) if m.groups() else "<unnamed>"
+            if (name, i) in seen:
+                continue
+            seen.add((name, i))
+            sig = line.strip()
+            if len(sig) > 100:
+                sig = sig[:97] + "..."
+            out.append({
+                "name": name,
+                "kind": kind,
+                "line": i,
+                "signature": sig,
+            })
+            break
+        if len(out) >= 30:
+            break
+    return out
+
+
+# Comments that surface design intent. These regex patterns intentionally
+# target the phrasings authors use when explaining WHY (not what).
+_WHY_PATTERNS: tuple[re.Pattern, ...] = (
+    re.compile(r"//\s*(because|since|reason:|note:|gotcha:|hack:|warning:|fixme:|todo:|important:|tradeoff:|caveat:|why:|we use|we do|prefer|avoid|don'?t|don.t|do not|never|always|must|critical|otherwise|in case)\b", re.IGNORECASE),
+    re.compile(r"#\s*(because|since|reason:|note:|gotcha:|hack:|warning:|fixme:|todo:|important:|tradeoff:|caveat:|why:|we use|we do|prefer|avoid|don'?t|don.t|do not|never|always|must|critical|otherwise|in case)\b", re.IGNORECASE),
+    # Block-comment starting with /** or /* — pick up first sentence
+    re.compile(r"/\*\*?\s*(.{20,300}?because|.{20,300}?reason|.{20,300}?note|.{20,300}?why)\s", re.IGNORECASE | re.DOTALL),
+)
+
+
+def _extract_why_comments(key_files: list[dict]) -> list[dict]:
+    """For each key file, find lines whose comments explain WHY (not
+    what). Returns a list of {file, line, text} dicts. Caps at 12 per
+    repo so the prompt doesn't bloat."""
+    out: list[dict] = []
+    for kf in key_files:
+        path = kf.get("path", "")
+        code = kf.get("code", "")
+        for i, line in enumerate(code.splitlines(), start=1):
+            if len(out) >= 12:
+                return out
+            for pat in _WHY_PATTERNS[:2]:  # line-level patterns
+                if pat.search(line):
+                    text = line.strip()
+                    if len(text) > 200:
+                        text = text[:197] + "..."
+                    out.append({
+                        "file": path,
+                        "line": i,
+                        "text": text,
+                    })
+                    break
+    return out
+
+
+def _read_changelog(repo_root: Path) -> str:
+    """Read CHANGELOG.md / HISTORY.md if present. First ~3000 chars only —
+    enough to see the latest few versions' notes."""
+    for name in ("CHANGELOG.md", "CHANGELOG", "HISTORY.md", "HISTORY", "RELEASES.md"):
+        path = repo_root / name
+        if path.is_file():
+            try:
+                return path.read_text(encoding="utf-8", errors="ignore")[:3000]
+            except OSError:
+                continue
+    return ""
+
+
+def _extract_readme_paragraphs(readme: str) -> list[str]:
+    """Pull the 3-5 most substantive paragraphs from the README. Skips
+    badges, headers, code blocks, install instructions, and table-of-
+    contents-style lists. What's left tends to be the "why does this
+    exist" prose that beats anything Claude could infer from code."""
+    if not readme:
+        return []
+    # Strip badge images and link-only lines
+    lines = []
+    in_code = False
+    for line in readme.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code = not in_code
+            continue
+        if in_code:
+            continue
+        if stripped.startswith("#"):
+            continue  # heading
+        if re.match(r"^\s*\[!\[.+\]\(.+\)\]", line):
+            continue  # badge
+        if re.match(r"^\s*\!\[.+\]\(.+\)", line):
+            continue  # image
+        lines.append(line)
+
+    # Paragraphs separated by blank lines.
+    paragraphs: list[str] = []
+    current: list[str] = []
+    for line in lines:
+        if line.strip():
+            current.append(line.strip())
+        elif current:
+            paragraphs.append(" ".join(current))
+            current = []
+    if current:
+        paragraphs.append(" ".join(current))
+
+    # Filter: substantive = >= 80 chars, not a markdown link list
+    substantive = [
+        p for p in paragraphs
+        if len(p) >= 80
+        and p.count("](") < 3  # link list
+        and not re.match(r"^[-*]\s", p)  # bullet
+    ][:5]
+    # Truncate each to 400 chars to keep prompt size bounded.
+    return [p[:400] for p in substantive]
+
+
+def _build_exports_index(key_files: list[dict]) -> list[dict]:
+    """Flatten exports across all key files into a single index. Sorted
+    by in_degree of the containing file (most-imported first), then
+    line number."""
+    out: list[dict] = []
+    for kf in key_files:
+        for exp in kf.get("exports", []):
+            out.append({
+                "file": kf.get("path", ""),
+                "in_degree": kf.get("in_degree", 0),
+                **exp,
+            })
+    out.sort(key=lambda e: (-e.get("in_degree", 0), e.get("line", 0)))
+    return out

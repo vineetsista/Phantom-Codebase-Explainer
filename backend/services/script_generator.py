@@ -34,16 +34,40 @@ from services.repo_analyzer import AnalysisResult
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a clear, informed teacher recording a short video walkthrough of a codebase. Your audience is developers who want to understand HOW the code works and WHY the author made each decision. You explain like a great instructor — concrete, specific, and unbiased. Your authority comes from understanding the code, not from harsh takes about the tools it competes with.
+SYSTEM_PROMPT = """You are writing the narration for a 2-3 minute video about a code repository. The viewer is a working developer who has limited time. They COULD read the README themselves in 30 seconds. So your script has to give them something the README can't.
+
+THE BAR. A senior engineer watching this video for 3 minutes should come away with:
+  1. ONE non-obvious insight about HOW this code actually works that they
+     wouldn't get from skimming the README
+  2. ONE specific pattern, function, or design choice they could STEAL
+     for their own work
+  3. ONE concrete pitfall the code sidesteps that they'd otherwise
+     stumble into
+If your script only restates what the README says, you've failed. The
+viewer's time was better spent on GitHub.
+
+EVIDENCE-FIRST DISCIPLINE. The analyzer hands you the FULL TEXT of the 3-5
+most-imported files in this repo (`key_files`), every exported symbol
+with its line number and signature (`exports_index`), the comments that
+explain WHY (`why_comments`), the substantive paragraphs from the README
+(`readme_key_paragraphs`), and the changelog if it exists
+(`changelog_excerpt`). USE THIS EVIDENCE.
+
+  - Quote ACTUAL function names from `exports_index`.
+  - When a `why_comments` entry reveals intent, lift the idea (not the
+    literal text) into the narration: "they note that `Map` was used
+    instead of `Object` because keys can be Symbols" — that's the kind
+    of thing the README doesn't tell you.
+  - When the README paragraph explains the motivation, paraphrase it
+    once in the intro, but THEN go beyond it — surface something the
+    README didn't say.
+  - When the CHANGELOG shows a recent design pivot ("v4: parser is now
+    streaming"), the script should land that as a takeaway.
 
 You are explaining the user's repo. Nothing else. Never describe:
   - What AI tools do, or how this video was generated
   - Phantom, narration, voiceover, "this video", "this explainer"
-  - Any meta-commentary about your own process, fallbacks in the
-    narration tool, or the way the explainer was assembled
-If you find yourself drifting into "the narrator", "the AI", "this
-video", or "the system" — stop and redirect to the actual code in the
-repo.
+  - Any meta-commentary about your own process
 
 Your job is to produce a script that makes a developer feel they understand the codebase by the end. Not because it was entertaining, but because every observation was specific, every concept was explained, and the relationships between parts were made clear.
 
@@ -342,6 +366,22 @@ Rules:
 - `code` for each highlight must be the exact source line that
   appears in the input at that line number. No paraphrasing.
 
+PRE-WRITE DRAFTING (DO THIS BEFORE WRITING NARRATION).
+
+Before composing any section, write yourself a quick internal brief — DO
+NOT include it in the JSON output, but use it to drive the narration:
+
+  - **The non-obvious insight**: One sentence. What did you have to read
+    the code to learn that the README didn't tell you?
+  - **The stealable pattern**: One specific function, idiom, or data
+    structure choice a reader could lift into their own code.
+  - **The sidestepped trap**: What does this code defend against that
+    most implementations get wrong?
+
+If you can't fill all three with concrete evidence from `key_files` or
+`why_comments`, the repo is too thin and you should weave a strong
+takeaway into whichever you CAN fill. But never fabricate.
+
 Return ONLY valid JSON (no prose, no code fences) with this exact structure:
 
 {
@@ -598,19 +638,69 @@ def generate(analysis: AnalysisResult) -> dict[str, Any]:
     return _mock_script(analysis)
 
 
+def _build_analysis_payload(analysis: AnalysisResult) -> str:
+    """Build the JSON payload sent to Claude.
+
+    The v4 analyzer emits MUCH more evidence than the prompt could
+    swallow if naively serialized — 5 key files × 400 lines × 70 chars
+    ~= 140 KB, plus exports, why-comments, README paragraphs, changelog.
+    Stuffing everything into one prompt blows past 30 KB and dilutes
+    Claude's attention.
+
+    Strategy: trim each section to its highest-signal sub-fields, with
+    explicit caps. The key file CODE is the single biggest payload —
+    we send the first key file in full (it's the most-imported), and
+    only the exports + signatures for the others. Claude can ask for
+    more in a later turn if needed, but in practice the structured
+    summary plus one full file is enough for the brief."""
+    d = analysis.to_dict()
+
+    # Trim key_files: full code for the top one, only metadata + exports
+    # for the rest. This is the biggest token saving.
+    key_files = d.get("key_files") or []
+    trimmed_kf: list[dict] = []
+    for i, kf in enumerate(key_files):
+        if i == 0:
+            trimmed_kf.append(kf)  # full
+        else:
+            trimmed_kf.append({
+                "path": kf.get("path"),
+                "language": kf.get("language"),
+                "line_count": kf.get("line_count"),
+                "in_degree": kf.get("in_degree"),
+                "exports": kf.get("exports", [])[:20],
+                # First 60 lines for context, not 400.
+                "code_head": "\n".join(
+                    (kf.get("code") or "").splitlines()[:60]
+                ),
+            })
+    d["key_files"] = trimmed_kf
+
+    # Trim config_files content — they're noisy and rarely useful.
+    if d.get("config_files"):
+        d["config_files"] = {
+            k: (v[:1000] if isinstance(v, str) else v)
+            for k, v in d["config_files"].items()
+            if k in {"package.json", "Cargo.toml", "pyproject.toml", "tsconfig.json", "go.mod"}
+        }
+
+    # Trim README excerpt — readme_key_paragraphs already has the substance.
+    if d.get("readme_excerpt"):
+        d["readme_excerpt"] = d["readme_excerpt"][:1500]
+
+    return json.dumps(d, default=str)[:36_000]
+
+
 def _generate_with_claude(analysis: AnalysisResult, api_key: str) -> dict[str, Any]:
     # Import lazily so the worker boots even if the package is unavailable.
     from anthropic import Anthropic
 
     client = Anthropic(api_key=api_key)
-    analysis_payload = json.dumps(analysis.to_dict(), default=str)[:18_000]
+    analysis_payload = _build_analysis_payload(analysis)
+    logger.info("Script generator analysis payload size: %d chars", len(analysis_payload))
 
     message = client.messages.create(
         model="claude-sonnet-4-5",
-        # 8192 tokens — the schema gained ~3 KB of new required fields
-        # (architecture modules/connections/data_flows, code walkthrough
-        # highlights with code/annotation/cross_reference, why_it_matters).
-        # 3072 truncated mid-string on the first attempt.
         max_tokens=8192,
         system=SYSTEM_PROMPT,
         messages=[
@@ -1267,6 +1357,35 @@ def _normalize(script: dict[str, Any], analysis: AnalysisResult) -> dict[str, An
                 )
                 continue
             actual = excerpt_lines[line_no - 1].strip()
+            # NEW: blank / whitespace-only / decoration-only lines are
+            # never useful highlights. The user reported v3 videos
+            # underlining empty lines with no annotation, which looked
+            # broken. Reject anything that has nothing for the viewer
+            # to read on the active line.
+            if not actual:
+                logger.info(
+                    "Dropping highlight: line %d is blank in excerpt",
+                    line_no,
+                )
+                continue
+            if actual in {"{", "}", "(", ")", "[", "]", ");", "});", "})", "});", ")", ";"}:
+                logger.info(
+                    "Dropping highlight: line %d is structural only (%r)",
+                    line_no, actual,
+                )
+                continue
+            # Comment-only lines are usually not the right highlight unless
+            # Claude has an annotation that makes it relevant. Allow if the
+            # annotation explains why it's interesting.
+            comment_only = bool(
+                re.match(r"^\s*(//|#|\*|/\*|\*/)", actual)
+            )
+            if comment_only and not (h.get("annotation") or "").strip():
+                logger.info(
+                    "Dropping highlight: line %d is comment-only and no annotation given",
+                    line_no,
+                )
+                continue
             if not line_text:
                 # No text supplied — accept and fill from the excerpt.
                 h["code"] = actual

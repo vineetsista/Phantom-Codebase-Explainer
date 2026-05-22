@@ -108,8 +108,14 @@ export const RemotionRoot: React.FC = () => {
         component={PhantomVideo}
         durationInFrames={totalFrames(PREVIEW_SCRIPT)}
         fps={FPS}
-        width={1920}
-        height={1080}
+        // v4 — dropped from 1920×1080 to 1280×720 (44% the pixel count)
+        // to cut render time roughly in half. 720p still looks crisp
+        // for a code-walkthrough video and is the default everywhere
+        // it's actually consumed (embedded players, blog posts,
+        // Twitter previews). 4K only matters for cinematic content,
+        // which this isn't.
+        width={1280}
+        height={720}
         defaultProps={PREVIEW_PROPS}
         calculateMetadata={({ props }) => ({
           durationInFrames: totalFrames(props.script),
