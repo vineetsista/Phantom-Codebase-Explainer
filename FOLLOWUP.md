@@ -78,3 +78,13 @@ order listed.
 - **Code walkthrough "result bubbles".** Floating "→ value" bubbles
   after function-call lines. Adds highlights[].result_value to the
   schema; renderer pops a small bubble below the line.
+- **Sound design.** The brief asked for an ambient pad at -32dB,
+  whoosh SFX on scene transitions, ping on module activations, typing
+  SFX during type-on punchline. Skipped this pass — needs curated
+  royalty-free SFX assets (Linear / Stripe-style subtlety). When ready:
+    - Drop SFX MP3s into `frontend/public/sfx/`
+    - Reference them from a new `SoundDesign.tsx` Remotion component
+      that uses `<Audio>` with absolute `from` placements (whoosh at
+      each scene boundary computed from script.chapters)
+    - Ambient pad as `<Audio src=...volume={0.04}>` wrapping the whole
+      composition
