@@ -933,7 +933,7 @@ def sync_visuals_to_alignment(
             # subsequent modules toward an even distribution.
             if audio_dur > 0 and len(modules) >= 4:
                 avg_slot = audio_dur / max(1, len(modules))
-                max_gap = avg_slot * 2.5
+                max_gap = avg_slot * 1.9
                 for i in range(1, len(modules)):
                     prev_t = float(modules[i - 1].get("narration_start_seconds") or 0)
                     cur_t = float(modules[i].get("narration_start_seconds") or 0)
@@ -1174,7 +1174,7 @@ def sync_visuals_to_alignment(
             # a 47.6s gap between L22 and L24 (basically the whole audio).
             if audio_dur_c > 0 and len(highlights) >= 3:
                 avg_slot_c2 = audio_dur_c / max(1, len(highlights))
-                max_gap_c = avg_slot_c2 * 2.5
+                max_gap_c = avg_slot_c2 * 1.9
                 for i in range(1, len(highlights)):
                     prev_t = float(highlights[i - 1].get("narration_start_seconds") or 0)
                     cur_t = float(highlights[i].get("narration_start_seconds") or 0)
