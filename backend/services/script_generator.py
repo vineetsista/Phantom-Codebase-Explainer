@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, Optional
 
 from config import get_settings
 from services.repo_analyzer import AnalysisResult
@@ -154,6 +154,29 @@ NEVER WRITE CODE SNIPPETS YOU DID NOT SEE IN THE INPUT. If a fact you
 want to mention isn't supported by something in `top_files` or
 `code_excerpt`, pick a different angle. Plausible-sounding code that
 doesn't appear verbatim in the input is forbidden output.
+
+MONOREPO HANDLING. If the input includes a `monorepo` field with
+`is_monorepo: true`, acknowledge it once early in the script — usually as
+a beat in the intro or the first sentence of the architecture section.
+Example: "Zod is a monorepo, but the parts you care about live in
+packages/zod." Don't dwell on it; the viewer wants the core insight, not
+project-management trivia. The analyzer has already drilled into the
+primary package — every file path, module name, and code excerpt you see
+is from inside that package.
+
+KEY TAKEAWAYS MUST BE SPECIFIC, NOT METADATA. The three key_takeaways
+items appear on screen as cards. Each one must be a non-obvious
+observation a viewer can act on. These are FORBIDDEN as takeaways
+(they're just metadata anyone can read off the GitHub page):
+  - "Built primarily in TypeScript"
+  - "Organized as a monolith"
+  - "Uses TypeScript, JavaScript, Shell"
+  - "Has good test coverage"
+  - "Open source under MIT"
+GOOD takeaway examples (specific, mechanistic, steal-worthy):
+  - "Schemas double as runtime validators and TypeScript types from one source"
+  - "Errors carry structured paths so they map cleanly to form fields"
+  - "Refinement runs after parsing, so transforms see the parsed value"
 
 NEVER WRITE URLS, LONG DOMAIN NAMES, OR DEEP FILE PATHS INTO NARRATION.
 These get read out loud character by character by the TTS and sound
@@ -437,6 +460,47 @@ _LINE_REFERENCE = re.compile(r"\bline\s+\d+\b", re.IGNORECASE)
 
 REQUIRED_SECTIONS = ("intro", "architecture", "code_walkthrough", "summary")
 
+# Takeaways that read as metadata, not insight. These are auto-rejected and
+# trigger a revision pass — anything that could be lifted verbatim off a
+# GitHub repo card is too thin to occupy one of the three summary slots.
+_GENERIC_TAKEAWAY_PATTERNS: tuple[re.Pattern, ...] = (
+    re.compile(r"^built (primarily |mainly )?in [A-Za-z+]+$", re.IGNORECASE),
+    re.compile(r"^(written|coded) in [A-Za-z+]+$", re.IGNORECASE),
+    re.compile(r"^organized as a? ?(monolith|library|framework|monorepo)$", re.IGNORECASE),
+    re.compile(r"^uses?\s+[A-Za-z]+(,?\s+[A-Za-z+]+){1,3}\.?$", re.IGNORECASE),
+    re.compile(r"^(has|with) (good |comprehensive |excellent )?test coverage", re.IGNORECASE),
+    re.compile(r"^open source( under [A-Za-z 0-9]+)?\.?$", re.IGNORECASE),
+    re.compile(r"^MIT licens(ed|e)\.?$", re.IGNORECASE),
+    re.compile(r"^[\w\- ]+ is (an?|the) [\w\- ]+ library\.?$", re.IGNORECASE),
+)
+
+
+def _is_generic_takeaway(t: str) -> bool:
+    t = (t or "").strip().rstrip(".!?")
+    if not t or len(t) < 10:
+        return True
+    return any(p.search(t) for p in _GENERIC_TAKEAWAY_PATTERNS)
+
+
+def _takeaway_anchor(takeaway: str) -> Optional[str]:
+    """Pull a distinctive 2-3 word anchor from a takeaway for grep-style
+    presence checks. Returns None if nothing distinctive can be extracted."""
+    if not takeaway:
+        return None
+    # Drop stopwords + tokens shorter than 4 chars (less distinctive).
+    stop = {
+        "a", "an", "the", "is", "are", "was", "were", "to", "for", "of",
+        "in", "on", "at", "by", "and", "or", "but", "with", "from", "as",
+        "that", "this", "it", "be", "you", "your",
+    }
+    tokens = [
+        w for w in re.findall(r"[A-Za-z][A-Za-z0-9_-]+", takeaway)
+        if len(w) >= 4 and w.lower() not in stop
+    ]
+    return tokens[0].lower() if tokens else None
+
+
+
 
 def _slop_score(narration: str) -> list[str]:
     """Return the list of slop patterns that match the given narration. Empty
@@ -530,6 +594,15 @@ def _generate_with_claude(analysis: AnalysisResult, api_key: str) -> dict[str, A
     # revision pass. Cheap and deterministic — saves a round trip.
     parsed["title"] = _scrub_title(parsed.get("title", ""))
 
+    # Generic-takeaway check. If any of the three key_takeaways reads like
+    # metadata you could lift off the GitHub repo card, ask Claude for a
+    # one-shot rewrite of the takeaways list (no need to regenerate the
+    # whole script). Falls through silently on API failure.
+    try:
+        _enforce_specific_takeaways(client, parsed, analysis)
+    except Exception as exc:
+        logger.warning("Takeaway specificity pass failed: %s", exc)
+
     # Up to 3 stop-slop / revision passes. Each pass is only invoked when
     # heuristics actually fire, so the typical job pays for at most one
     # extra model call. A pass that doesn't reduce the slop count gets
@@ -588,6 +661,79 @@ def _generate_with_claude(analysis: AnalysisResult, api_key: str) -> dict[str, A
         logger.warning("Spoken-word pass failed, shipping pre-pass script: %s", exc)
 
     return _normalize(parsed, analysis)
+
+
+def _enforce_specific_takeaways(
+    client: Any, parsed: dict[str, Any], analysis: AnalysisResult
+) -> None:
+    """If any of the three key_takeaways reads like generic metadata, ask
+    Claude for a single replacement pass. Mutates `parsed` in place.
+
+    Cheap (one API call, only fires when triggered) and high-leverage —
+    generic takeaways were the user-reported "summary cards say nothing"
+    failure mode."""
+    takeaways = parsed.get("key_takeaways") or []
+    bad_indices = [i for i, t in enumerate(takeaways) if _is_generic_takeaway(str(t))]
+    if not bad_indices:
+        return
+
+    logger.info(
+        "Generic takeaway(s) detected at index %s: %s",
+        bad_indices, [takeaways[i] for i in bad_indices],
+    )
+
+    # Provide the model the analyzer payload AND the existing script so it
+    # can produce takeaways grounded in real code observations.
+    context = {
+        "current_takeaways": takeaways,
+        "bad_indices": bad_indices,
+        "title": parsed.get("title", ""),
+        "hook": parsed.get("hook", ""),
+        "code_excerpt_path": (analysis.code_excerpt or {}).get("path", ""),
+        "code_excerpt_first_lines": "\n".join(
+            (analysis.code_excerpt or {}).get("code", "").splitlines()[:30]
+        ),
+        "module_names": [m.get("name") for m in analysis.modules[:8]],
+    }
+    system = (
+        "You are sharpening the SUMMARY CARDS for a video about a code "
+        "repository. The three key_takeaways must each be a SPECIFIC, "
+        "NON-OBVIOUS observation about how this code actually works — "
+        "the kind a viewer could STEAL and use in their own code. "
+        "Forbidden: 'Built primarily in X', 'Organized as a monolith', "
+        "'Uses TypeScript, JavaScript', 'Open source', any other "
+        "metadata you could lift off a GitHub repo card. Required: a "
+        "mechanism, a pattern, or a non-obvious design choice grounded "
+        "in the code excerpt below. Each takeaway is 7-12 words. "
+        "Return JSON: {\"key_takeaways\": [...3 strings...]}."
+    )
+    msg = client.messages.create(
+        model="claude-sonnet-4-5",
+        max_tokens=512,
+        system=system,
+        messages=[{
+            "role": "user",
+            "content": (
+                "Rewrite the takeaways flagged as generic. Return all three "
+                "in the final array.\n\n```json\n"
+                + json.dumps(context, indent=2)
+                + "\n```"
+            ),
+        }],
+    )
+    out = _extract_json(msg)
+    new_takeaways = out.get("key_takeaways") or []
+    if (
+        isinstance(new_takeaways, list)
+        and len(new_takeaways) == 3
+        and all(isinstance(t, str) and t.strip() for t in new_takeaways)
+    ):
+        parsed["key_takeaways"] = [t.strip() for t in new_takeaways]
+        logger.info("Takeaways replaced: %s", parsed["key_takeaways"])
+    else:
+        logger.warning(
+            "Takeaway rewrite returned malformed payload, keeping originals"
+        )
 
 
 def _spoken_word_pass(client: Any, parsed: dict[str, Any]) -> dict[str, Any]:
@@ -1131,9 +1277,18 @@ def _heuristic_highlight_lines(code: str) -> list[int]:
 
 
 def _default_takeaways(analysis: AnalysisResult) -> list[str]:
-    langs = ", ".join(list(analysis.languages.keys())[:3]) or "multiple languages"
+    """Fallback takeaways when Claude isn't available. Tries to be at least
+    a little specific by referencing the entry point and module count rather
+    than the language metadata alone — the old defaults all failed the
+    generic-takeaway check the script generator itself uses."""
+    name = analysis.repo.get("name") or "this project"
+    entry = (analysis.entry_points[:1] or [""])[0] or "the entry point"
+    entry_basename = entry.rsplit("/", 1)[-1] if entry else "the entry"
+    primary_module = (
+        analysis.modules[0].get("name") if analysis.modules else "the source tree"
+    )
     return [
-        f"Built primarily in {analysis.repo.get('primary_language') or 'code'}",
-        f"Organized as a {analysis.architecture_hint}",
-        f"Uses {langs}",
+        f"The entry point sits in {entry_basename}",
+        f"Source flow runs through {primary_module}",
+        f"{name} keeps its surface area small and focused",
     ]
