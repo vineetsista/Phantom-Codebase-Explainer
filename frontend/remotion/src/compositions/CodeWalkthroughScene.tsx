@@ -215,7 +215,11 @@ export const CodeWalkthroughScene: React.FC<{ section: ScriptSection }> = ({
     fps,
     config: { damping: 20, stiffness: 90 },
   });
-  const baseScale = isEmphasis ? 1.18 : 1.0;
+  // 1.10× instead of 1.18× — at 1.18 the active line was being clipped
+  // on the left edge because the transform-origin was horizontally centered,
+  // pushing 9% of the line off either side. 1.10× still draws the eye but
+  // leaves enough horizontal slack that the start of the line stays visible.
+  const baseScale = isEmphasis ? 1.10 : 1.0;
   const panelScale = isEmphasis ? interpolate(emphasisSpring, [0, 1], [1.0, baseScale]) : baseScale;
   // Center the zoom on the line being highlighted.
   const viewportHeight = LINE_HEIGHT * VISIBLE_LINES;
@@ -224,10 +228,8 @@ export const CodeWalkthroughScene: React.FC<{ section: ScriptSection }> = ({
       ? (activeLineNumber - 1) * LINE_HEIGHT + scrollOffset
       : viewportHeight / 2;
   // Clamp the zoom origin to the middle 60% of the viewport so the active
-  // line never clips when the panel scales to 1.18×. If the origin was at
-  // 0% (top) or 100% (bottom), scale=1.18 would push 18% of the content
-  // off the opposite edge — which previously cropped the highlighted line
-  // when it sat near the viewport boundary.
+  // line never clips when the panel scales. If the origin was at 0% (top)
+  // or 100% (bottom), zoom would push content off the opposite edge.
   const zoomOriginPct = Math.max(
     20,
     Math.min(80, (lineYInViewport / viewportHeight) * 100),
@@ -389,7 +391,13 @@ export const CodeWalkthroughScene: React.FC<{ section: ScriptSection }> = ({
                   position: "absolute",
                   inset: 0,
                   transform: `scale(${panelScale})`,
-                  transformOrigin: `50% ${zoomOriginPct}%`,
+                  // LEFT-anchored origin. Center origin (50%) was pushing the
+                  // first ~5-6 characters of the active line off the panel's
+                  // left edge during emphasis zoom — see Sebastien's bug
+                  // report on the is-online v2 render (cn7018c6...). Anchoring
+                  // to 0% means the zoom only expands rightward, preserving
+                  // the indent + the start of the line text.
+                  transformOrigin: `0% ${zoomOriginPct}%`,
                 }}
               >
                 {/* The scrollable code surface. */}
