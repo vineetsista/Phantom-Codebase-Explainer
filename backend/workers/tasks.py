@@ -11,6 +11,7 @@ from services import (
     diagram_generator,
     repo_analyzer,
     script_generator,
+    summary_generator,
     video_assembler,
     voice_generator,
 )
@@ -102,6 +103,18 @@ def generate_video(self, job_id: str, repo_url: str, options: dict[str, Any]) ->
             details={"stage": "Script ready", "title": script.get("title", "")},
             script_data=script,
         )
+
+        # v6 — written summary via Haiku. Best-effort: a failure here
+        # never blocks video generation. Stored on the same Video row
+        # for the /video/[id]/summary page to read.
+        try:
+            summary = summary_generator.generate_summary(analysis)
+            if summary:
+                _update(job_id, summary_data=summary)
+                logger.info("job=%s wrote summary_data (%d chars)",
+                            job_id, len(summary.get("markdown", "")))
+        except Exception as exc:
+            logger.warning("summary generation failed (non-fatal): %s", exc)
 
         # Stage 3 — diagram
         _update(
