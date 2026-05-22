@@ -88,3 +88,46 @@ order listed.
       each scene boundary computed from script.chapters)
     - Ambient pad as `<Audio src=...volume={0.04}>` wrapping the whole
       composition
+
+
+## From v2 overnight quality pass (2026-05-22)
+
+Phases substantively shipped: 1 (analyzer monorepo + filtering),
+2 (script generator monorepo awareness + generic-takeaway block),
+4 (intro/code scene restraint), 5 (volume + percent keyboard
+shortcuts), 6 (HEAD support), 7 (interesting_observations +
+personality_traits).
+
+Deferred from the v2 brief because they need user judgment, real
+hardware, or curated assets I don't have:
+
+- **THE_CLEVER_BIT analyzer field** (Phase 7, bullet 2). The brief
+  proposed heuristics — function with most call sites, recurring
+  pattern across files, names like "retry/race/memoize." Doing this
+  well needs a real AST parser per language, not regex; cheap version
+  would catch about half the patterns and false-positive the rest.
+  The new `interesting_observations` and walkthrough-file scoring
+  already give the script generator enough hooks to feature the
+  clever pattern naturally (zod's narration already lands on the
+  parse-vs-validate trick).
+- **Per-section voice variation** (Phase 3). The voice_pipeline memory
+  is explicit about how carefully the current settings were tuned to
+  avoid language drift; changing `style` mid-narration risks
+  regressing on that. Worth A/B testing through `backend/scripts/voice_ab.py`
+  before shipping.
+- **Ambient audio bed** (Phase 4, last item). Needs a curated royalty-
+  free pad asset. Same note as the sound-design section above.
+- **Mobile 375px audit** (Phase 5, sub-bullet). DevTools emulation
+  isn't a substitute for real touch hardware; deferred to a real
+  device session.
+- **Cross-browser sweep** (Phase 9). Chrome / Firefox / Safari on
+  the same render. No automation available in this environment.
+- **Lighthouse audit** (Phase 9). `npm run audit` not wired up.
+- **Landing showcase video swap** (Phase 8). Requires picking the
+  "best" of the four newly-generated test videos — a judgment call
+  that belongs to the user, not me. The four new job IDs are listed
+  in RELEASE_NOTES.md; pick whichever reads best after watching.
+- **Pricing tier audit** (Phase 8). The brief proposed Free / Pro /
+  Team tiers with specific limits and prices. I don't know the
+  user's actual billing plan or what they can deliver; this is a
+  business decision, not a code change.
