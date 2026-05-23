@@ -179,6 +179,13 @@ app.mount(
     name="thumbnails",
 )
 
+# v7 — per-video OG frames (4 JPGs per job under frames/{job_id}/).
+# Same parent dir as videos. Mount as static so the OG card endpoint can
+# fetch them via HTTP without going through the FastAPI router.
+_frames_dir = Path(settings.video_output_dir).parent / "frames"
+_frames_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/media/frames", StaticFiles(directory=str(_frames_dir)), name="frames")
+
 
 @app.get("/")
 def root() -> dict:

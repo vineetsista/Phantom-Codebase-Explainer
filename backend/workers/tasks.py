@@ -9,6 +9,7 @@ from config import get_settings
 from models import SessionLocal, Video, VideoStatus
 from services import (
     diagram_generator,
+    frame_extractor,
     repo_analyzer,
     script_generator,
     summary_generator,
@@ -210,6 +211,21 @@ def generate_video(self, job_id: str, repo_url: str, options: dict[str, Any]) ->
             video_quality=quality,
             completed_at=datetime.utcnow(),
         )
+
+        # v7 — extract OG frames after the video is finalized. Best-effort:
+        # never block the job's completion on this. The OG card composer
+        # at /api/og?id=... reads them; if missing it falls back to a
+        # repo-metadata-only card.
+        try:
+            frames_dir = Path(settings.video_output_dir).parent / "frames" / job_id
+            frame_extractor.extract_frames(
+                Path(output["video_path"]),
+                frames_dir,
+                float(output["duration_seconds"]),
+            )
+        except Exception as exc:
+            logger.warning("Frame extraction failed (non-fatal): %s", exc)
+
         return {"video_url": output["video_path"], "duration": output["duration_seconds"]}
     except Exception as exc:
         logger.exception("Generation failed for job %s", job_id)
