@@ -18,6 +18,30 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 logger = logging.getLogger("phantom.api")
 
 
+# v7g — Sentry init. Enabled when SENTRY_DSN is set; silent otherwise.
+# Done at module import time so any error during FastAPI startup
+# (database connection failures, etc.) is captured. sentry-sdk is an
+# optional dep — if it's not installed we just warn and continue.
+_sentry_dsn = os.environ.get("SENTRY_DSN")
+if _sentry_dsn:
+    try:
+        import sentry_sdk  # type: ignore
+        from sentry_sdk.integrations.fastapi import FastApiIntegration  # type: ignore
+        from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration  # type: ignore
+
+        sentry_sdk.init(
+            dsn=_sentry_dsn,
+            traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.2")),
+            profiles_sample_rate=float(os.environ.get("SENTRY_PROFILES_SAMPLE_RATE", "0.1")),
+            send_default_pii=False,
+            environment=os.environ.get("SENTRY_ENVIRONMENT", "production"),
+            integrations=[FastApiIntegration(), SqlalchemyIntegration()],
+        )
+        logger.info("Sentry initialized")
+    except Exception as exc:
+        logger.warning("Sentry init failed (%s) — continuing without", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Phantom API")

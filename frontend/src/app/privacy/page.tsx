@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   alternates: { canonical: `${BASE_URL}/privacy` },
 };
 
-const LAST_UPDATED = "2026-05-20";
+const LAST_UPDATED = "2026-05-23";
 
 export default function PrivacyPage() {
   return (
@@ -58,6 +58,28 @@ export default function PrivacyPage() {
               hello@phantom.video
             </a>
             , we keep the email thread for support.
+          </p>
+          <p>
+            For signed-in users we additionally store: your GitHub user id,
+            username, display name, email (from your GitHub profile), and a
+            monthly usage counter. We use PostHog for product analytics
+            (EU-region storage if you&apos;re in the EEA) and Sentry for error
+            tracking. Both honor the Do Not Track header.
+          </p>
+          <p>
+            For anonymous share dedup we record a SHA-256 hash of (IP + a
+            daily rotating salt). We do not store raw IPs.
+          </p>
+        </Block>
+
+        <Block heading="Your rights">
+          <p>
+            You can export all your data as JSON from{" "}
+            <span className="text-bone">/dashboard/settings → Download my data</span>,
+            and delete your account from the same page. Deletion cascades to
+            favorites, comments, reactions, collections, and API keys.
+            Generated videos are anonymized (user attribution removed) rather
+            than deleted, so existing shared URLs continue to resolve.
           </p>
         </Block>
 

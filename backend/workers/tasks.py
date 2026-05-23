@@ -8,6 +8,7 @@ from typing import Any
 from config import get_settings
 from models import SessionLocal, Video, VideoStatus
 from services import (
+    content_moderator,
     diagram_generator,
     frame_extractor,
     pr_analyzer,
@@ -97,6 +98,32 @@ def generate_video(self, job_id: str, repo_url: str, options: dict[str, Any]) ->
             progress=40,
             details={"stage": "Writing narration script"},
         )
+        # v7g — content moderation gate. Classify the README and either
+        # allow, soft_flag (proceed but tag), or block (fail the job). We
+        # do this AFTER analysis so we have a real README excerpt, but
+        # BEFORE the expensive script + voice steps.
+        try:
+            moderation = content_moderator.classify_readme(
+                analysis.readme_excerpt or ""
+            )
+            _update(job_id, details={"moderation": moderation.to_dict()})
+            if moderation.verdict == "block":
+                logger.warning(
+                    "job=%s blocked by content moderator: %s",
+                    job_id, moderation.reason,
+                )
+                _update(
+                    job_id,
+                    status=VideoStatus.failed,
+                    progress=100,
+                    error_message=(
+                        f"Content moderation refused this repo: {moderation.reason}"
+                    ),
+                )
+                return {"status": "blocked", "reason": moderation.reason}
+        except Exception as exc:
+            logger.warning("moderation step raised (non-fatal): %s", exc)
+
         intake_kind = options.get("intake_kind") or "repo"
         intake_meta = options.get("intake_meta") or {}
 

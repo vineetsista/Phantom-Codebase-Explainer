@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 
 import { Footer } from "@/components/layout/Footer";
 import { Navbar } from "@/components/layout/Navbar";
+import { AnalyticsScripts } from "@/components/shared/AnalyticsScripts";
 import { CommandPalette } from "@/components/shared/CommandPalette";
 import { CursorFollower } from "@/components/shared/CursorFollower";
 import { ExitIntentPopup } from "@/components/shared/ExitIntentPopup";
@@ -124,6 +125,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="min-h-screen bg-void font-body text-bone antialiased">
+        <AnalyticsScripts />
         <ToasterProvider>
           <GrainOverlay />
           <CursorFollower />
