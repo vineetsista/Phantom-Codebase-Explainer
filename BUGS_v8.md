@@ -98,6 +98,34 @@ features were never actually exercised end-to-end and are silently broken.
 - **Recommended longer-term fix**: drop the named volume in dev, accept the
   rebuild cost on dep changes. Defer to FOLLOWUP_v8.md.
 
+### BUG-010: Curated showcase detail pages tried to play non-existent MP4s
+- **Location**: `frontend/src/app/showcase/[slug]/page.tsx`.
+- **Reproduce**: visit `/showcase/react` (or any of 8 curated slugs).
+- **Expected**: video plays.
+- **Actual**: `<video>` element shows "No supported source was found"
+  because `/showcase/{slug}.mp4` 404s — those files were never produced.
+- **Root cause**: the curated SHOWCASE_REPOS list promised content that
+  doesn't exist on disk. Only `is-online-demo.mp4` is bundled.
+- **Status**: ✅ fixed in commit `cbd7998` — detail page now looks up a
+  real video via /api/v1/repo/{owner}/{name} and falls back to a
+  "generate this" CTA when none exists.
+
+### BUG-011 (CRITICAL): Celery worker not subscribed to v7 priority queues
+- **Location**: `docker-compose.yml` worker command.
+- **Reproduce**: queue any job → it stays at `queued` forever.
+- **Expected**: worker picks it up within ~1s.
+- **Actual**: jobs accumulate in `video.free` Redis list while the
+  worker listens on the default `celery` queue.
+- **Root cause**: v7 commit `ca64619` (cost-controls) routed jobs to
+  `video.priority` / `video.free` queues via celery `task_routes`, but
+  never updated the worker's command — it still ran with no `-Q`
+  flag, so it only consumed the default `celery` queue. Result: every
+  generation queued after that commit silently never started.
+- **Status**: ✅ fixed in this commit. Worker now starts with
+  `-Q video.priority,video.free`. Verified by queueing 6 jobs and
+  watching them all transition out of `queued` within seconds of the
+  worker restart.
+
 ## Not yet verified (Phase 0 incomplete because of CRITICAL bug cascade)
 
 These checks fail today because of BUG-001/002/003 above. Will revisit

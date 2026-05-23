@@ -71,7 +71,13 @@ services:
       # i.e. /app/public. Mount the frontend's public/ folder so brand fonts
       # load and so we can drop per-job audio files into it for staticFile().
       - ./frontend/public:/app/public
-    command: celery -A workers.celery_app worker --loglevel=info --concurrency=2
+    # v8 BUG-011: subscribe to both queues. The v7 priority queue work
+    # routed jobs to `video.priority` (Pro/Team) and `video.free`
+    # (Free/anonymous), but never updated this command — the worker
+    # was still listening only on the default `celery` queue, so
+    # every job sat unprocessed in `video.free`. List both queues
+    # with priority first so Celery prefers them.
+    command: celery -A workers.celery_app worker --loglevel=info --concurrency=2 -Q video.priority,video.free
 
   db:
     image: postgres:16-alpine
