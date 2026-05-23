@@ -57,6 +57,13 @@ def upsert_user(body: UpsertUserBody, db: Session = Depends(get_db)) -> dict:
         )
         db.add(user)
         logger.info("Created user %s (github=%s)", user.id, user.github_username)
+        # v7h — welcome email. Best-effort; missing RESEND_API_KEY no-ops.
+        try:
+            from services import email_dispatcher
+            if user.email:
+                email_dispatcher.send_welcome(user.email, user.name or user.github_username)
+        except Exception as exc:
+            logger.warning("welcome email failed for %s: %s", user.github_username, exc)
     else:
         # Update display fields on each login — GitHub profiles change.
         user.github_username = body.github_username

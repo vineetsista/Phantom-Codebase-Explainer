@@ -317,6 +317,24 @@ def generate_video(self, job_id: str, repo_url: str, options: dict[str, Any]) ->
         except Exception as exc:
             logger.warning("Frame extraction failed (non-fatal): %s", exc)
 
+        # v7h — generation-complete email. Best-effort; gated by
+        # email_on_complete preference.
+        try:
+            from services import email_dispatcher
+            with SessionLocal() as edb:
+                v = edb.get(Video, job_id)
+                if v and v.user_id:
+                    from models import User
+                    u = edb.query(User).filter(User.id == v.user_id).one_or_none()
+                    if u and u.email and u.email_on_complete:
+                        email_dispatcher.send_generation_complete(
+                            u.email,
+                            v.id,
+                            f"{v.repo_owner}/{v.repo_name}",
+                        )
+        except Exception as exc:
+            logger.warning("complete email failed (non-fatal): %s", exc)
+
         # v7 — fire user webhook if configured. Best-effort, never blocks.
         try:
             from services import webhook_dispatcher
