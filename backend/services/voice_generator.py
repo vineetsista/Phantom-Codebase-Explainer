@@ -44,11 +44,26 @@ logger = logging.getLogger(__name__)
 #
 # similarity_boost stays at 0.80 to preserve Brian's identity across the
 # tighter stability envelope. See VOICE_AB_TEST.md for prior comparisons.
+# v8 — tightened further. stability 0.52 reduces remaining stuttering
+# without flattening delivery. style 0.18 stays low enough to avoid the
+# language-drift bug. similarity_boost 0.78 vs the prior 0.80 buys a
+# little more breathing room for prosody.
 _ELEVENLABS_DEFAULTS = {
-    "stability": 0.45,
-    "similarity_boost": 0.80,
-    "style": 0.15,
+    "stability": 0.52,
+    "similarity_boost": 0.78,
+    "style": 0.18,
     "use_speaker_boost": True,
+}
+
+# Per-section overrides — applied as a dict merge on top of defaults.
+# The intro is the hook; we want a touch more energy. The code
+# walkthrough and summary want maximum clarity (extra stability) so
+# code names and takeaways land without slurring.
+_ELEVENLABS_SECTION_OVERRIDES: dict[str, dict] = {
+    "intro": {"style": 0.24},
+    "architecture": {},
+    "code_walkthrough": {"stability": 0.56},
+    "summary": {"stability": 0.56, "style": 0.20},
 }
 
 # English-only model — multilingual_v2 was implicated in the language-
@@ -165,6 +180,37 @@ _JARGON: dict[str, str] = {
     "p-queue": "p, queue",
     "p-retry": "p, retry",
     "p-cancelable": "p, cancelable",
+    # v8 — additional acronyms the listener flagged as mispronounced.
+    "AST": "ay ess tee",
+    "ASTs": "ay ess tees",
+    "DOM": "dee oh em",
+    "MVC": "em vee cee",
+    "ORM": "oh are em",
+    "GPU": "gee pee you",
+    "CPU": "cee pee you",
+    "RAM": "ram",  # explicit — Brian sometimes spelled it out
+    "GUI": "gooey",
+    "TOML": "tomel",
+    "DTO": "dee tee oh",
+    "DAO": "dao",  # rhymes with "now"
+    "K8s": "Kubernetes",  # variant spelling
+    # React hooks — read literally. Without these Brian splits at the
+    # camel-case boundary and pauses mid-word.
+    "useState": "use state",
+    "useEffect": "use effect",
+    "useMemo": "use memo",
+    "useCallback": "use callback",
+    "useRef": "use ref",
+    "useReducer": "use reducer",
+    "useContext": "use context",
+    # Python keywords occasionally come up as bare tokens in narration
+    # ("the async function..."). Most are real English; these three were
+    # the only ones the user flagged.
+    "kwargs": "kwargs",   # explicit so Brian doesn't say "kw args"
+    "argv": "arg vee",
+    "stdin": "ess tee dee in",
+    "stdout": "ess tee dee out",
+    "stderr": "ess tee dee err",
 }
 
 
@@ -562,12 +608,20 @@ def generate(
                 openai_text = re.sub(r'<break[^/]*/>', "", prepared).strip()
                 _generate_openai(openai_text, out_path, settings.openai_api_key)
             elif chosen == "elevenlabs":
+                # v8 — per-section voice settings. Intro gets a touch more
+                # style for energy; code_walkthrough + summary get extra
+                # stability for clarity on identifier-heavy lines.
+                voice_settings = {
+                    **_ELEVENLABS_DEFAULTS,
+                    **_ELEVENLABS_SECTION_OVERRIDES.get(section_id, {}),
+                }
                 alignment = _generate_elevenlabs(
                     prepared,
                     out_path,
                     settings.elevenlabs_api_key,
                     voice_id=settings.default_elevenlabs_voice_id,
                     model_id=settings.elevenlabs_model_id,
+                    voice_settings=voice_settings,
                 )
                 # v7f — record characters consumed for the monthly budget.
                 try:
@@ -1418,6 +1472,7 @@ def _generate_elevenlabs(
     voice_id: str,
     model_id: str,
     max_attempts: int = 4,
+    voice_settings: dict | None = None,
 ) -> dict[str, Any] | None:
     """Call ElevenLabs TTS with-timestamps so we capture word-level
     alignment alongside the audio. Returns the `alignment` dict from the
@@ -1448,7 +1503,7 @@ def _generate_elevenlabs(
     body = {
         "text": text,
         "model_id": effective_model,
-        "voice_settings": _ELEVENLABS_DEFAULTS,
+        "voice_settings": voice_settings or _ELEVENLABS_DEFAULTS,
         # Explicit language code stops the voice from "drifting" into Spanish
         # / French / German mid-sentence — a known issue with English-leaning
         # voices on multilingual models. Honored only by multilingual models;
