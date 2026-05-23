@@ -116,6 +116,48 @@ def get_me(user: User = Depends(require_user)) -> dict:
     return user.to_dict()
 
 
+@router.get("/users/{slug}")
+def get_user_profile(slug: str, db: Session = Depends(get_db)) -> dict:
+    """v7 — public profile page data. `slug` matches either the user's
+    custom_slug or their github_username (custom takes precedence)."""
+    from models import Video
+
+    user = (
+        db.query(User)
+        .filter((User.custom_slug == slug) | (User.github_username == slug))
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Public videos owned by this user, newest first.
+    videos_q = (
+        db.query(Video)
+        .filter(Video.user_id == user.id, Video.visibility == "public")
+        .order_by(Video.created_at.desc())
+        .limit(48)
+    )
+    videos = [v.to_dict() for v in videos_q.all()]
+
+    total_views = sum(int(v.get("view_count") or 0) for v in videos)
+    return {
+        "profile": {
+            "id": user.id,
+            "slug": user.custom_slug or user.github_username,
+            "github_username": user.github_username,
+            "name": user.name,
+            "avatar_url": user.avatar_url,
+            "bio": user.bio,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+        },
+        "stats": {
+            "video_count": len(videos),
+            "total_views": total_views,
+        },
+        "videos": videos,
+    }
+
+
 def check_quota(user: User) -> None:
     """Raise 429 with a clear upgrade message if the user has hit the
     monthly limit. Resets monthly_video_count if the period has rolled
