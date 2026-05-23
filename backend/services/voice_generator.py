@@ -1014,30 +1014,34 @@ def sync_visuals_to_alignment(
                     m["narration_start_seconds"] = t
                 prev_t = t
 
-            # GAP-SMOOTHER. If any single inter-module gap is more than
-            # 2.5x the average slot, the alignment dropped that module
-            # far from its neighbours (zod v5: 32s gap between module 1
-            # and module 2 of a 78s/6-module audio — 6x the avg). Pull
-            # subsequent modules toward an even distribution.
+            # GAP-SMOOTHER — v8 fix: NEVER shift an anchored module.
+            #
+            # The user reported visual lag of multiple seconds during the
+            # architecture scene: narrator says "apple check / IP" but the
+            # corresponding modules don't reveal until p-any. Root cause:
+            # this heuristic (and the two below) were also moving
+            # alignment-anchored timings, which is wrong by definition —
+            # if the alignment data says the word "apple-checker" lands at
+            # 8.2s, that's when the slide should reveal, regardless of
+            # what "ideal even-spacing" thinks.
+            #
+            # The smoother still runs on UNANCHORED (fallback-interpolated)
+            # modules. Those have no ground truth to defend.
             if audio_dur > 0 and len(modules) >= 4:
                 avg_slot = audio_dur / max(1, len(modules))
                 max_gap = avg_slot * 1.9
                 for i in range(1, len(modules)):
+                    # v8: anchored = ground truth. Hands off.
+                    if (modules[i].get("id") or "") in module_times:
+                        continue
                     prev_t = float(modules[i - 1].get("narration_start_seconds") or 0)
                     cur_t = float(modules[i].get("narration_start_seconds") or 0)
                     gap = cur_t - prev_t
                     if gap > max_gap:
-                        # Pull this module's start back toward avg_slot
-                        # after the previous one. Don't pull farther
-                        # than 50% of the original gap (preserves some
-                        # alignment signal).
                         ideal = prev_t + avg_slot
                         new_t = round((cur_t + ideal) / 2, 2)
-                        # Don't push later modules — shift only this one
-                        # and let later modules cascade naturally via
-                        # monotonicity bump (below).
                         logger.info(
-                            "Gap-smoother: module %d (%s) %.2fs -> %.2fs (gap was %.2fs, max %.2fs)",
+                            "Gap-smoother (fallback only): module %d (%s) %.2fs -> %.2fs (gap was %.2fs, max %.2fs)",
                             i, modules[i].get("label"), cur_t, new_t, gap, max_gap,
                         )
                         modules[i]["narration_start_seconds"] = new_t
@@ -1056,9 +1060,18 @@ def sync_visuals_to_alignment(
             # cluster. Fix: redistribute that cluster across a wider span by
             # respacing them at (avg_slot * 0.8) intervals starting from
             # the cluster's earliest member.
+            # v8 fix: tail-cluster redistribute DOES NOT touch any
+            # cluster that contains an anchored module. A real cluster in
+            # the narration (e.g. the narrator listing four dependencies
+            # in a single breath) is the truth — the modules SHOULD
+            # reveal in rapid succession. Spreading them out makes the
+            # visual drift away from what the listener hears.
+            #
+            # Tail-cluster only fires when an entire cluster is composed
+            # of fallback-interpolated modules (where we never had
+            # ground-truth timing to begin with).
             if audio_dur > 0 and len(modules) >= 4:
                 avg_slot = audio_dur / max(1, len(modules))
-                # Scan for cluster runs (3+ modules within tight spread).
                 i = 0
                 while i < len(modules) - 2:
                     j = i
@@ -1070,11 +1083,14 @@ def sync_visuals_to_alignment(
                     ):
                         j += 1
                     run_len = j - i + 1
-                    if run_len >= 3:
+                    # v8: skip the run if ANY module in it is anchored.
+                    cluster_has_anchor = any(
+                        (modules[k].get("id") or "") in module_times
+                        for k in range(i, j + 1)
+                    )
+                    if run_len >= 3 and not cluster_has_anchor:
                         start_t = float(modules[i].get("narration_start_seconds") or 0)
                         end_t = float(modules[j].get("narration_start_seconds") or 0)
-                        # Goal spread: at least avg_slot * 0.8 between consecutive.
-                        # Compute new end bounded by audio_dur - 0.5.
                         target_spread = (run_len - 1) * avg_slot * 0.85
                         target_end = min(audio_dur - 0.5, start_t + target_spread)
                         if target_end > end_t + 1.0:
@@ -1086,8 +1102,8 @@ def sync_visuals_to_alignment(
                                 )
                             new = [float(modules[k]["narration_start_seconds"]) for k in range(i, j + 1)]
                             logger.info(
-                                "Tail-cluster redistribute: modules %d-%d %s -> %s (audio=%.1fs)",
-                                i, j, old, new, audio_dur,
+                                "Tail-cluster (fallback only) redistribute: modules %d-%d %s -> %s",
+                                i, j, old, new,
                             )
                     i = j + 1
 
@@ -1112,9 +1128,18 @@ def sync_visuals_to_alignment(
             # alignment relies on file/identifier names that may not be
             # spoken). Last module gets near-zero blend — alignment is
             # usually most reliable for the last-mentioned thing.
+            # v8 fix: ideal-blend NEVER touches anchored modules. The
+            # whole point of word-level alignment is that the timing IS
+            # the ground truth. Pulling it 30% toward "ideal even
+            # spacing" was the single biggest contributor to the visual
+            # lag the user reported. The blend now applies only to
+            # fallback-interpolated modules, where it does what it was
+            # meant to do — keep them from clustering pathologically
+            # without any ground-truth signal to defend.
             if audio_dur > 0 and len(modules) >= 3:
                 for i, m in enumerate(modules):
-                    # Weight decays from 0.30 at i=0 to 0.05 at i=N-1.
+                    if (m.get("id") or "") in module_times:
+                        continue  # anchored — hands off
                     progress = i / max(1, len(modules) - 1)
                     blend_weight = 0.30 * (1.0 - progress) + 0.05 * progress
                     actual = float(m.get("narration_start_seconds") or 0.0)
@@ -1122,8 +1147,8 @@ def sync_visuals_to_alignment(
                     blended = round((1 - blend_weight) * actual + blend_weight * ideal, 2)
                     if abs(blended - actual) > 0.1:
                         logger.info(
-                            "Ideal-blend: module %d (%s) %.2fs -> %.2fs (ideal %.2fs, weight %.2f)",
-                            i, m.get("label"), actual, blended, ideal, blend_weight,
+                            "Ideal-blend (fallback only): module %d (%s) %.2fs -> %.2fs (ideal %.2fs)",
+                            i, m.get("label"), actual, blended, ideal,
                         )
                     m["narration_start_seconds"] = blended
 
@@ -1294,28 +1319,30 @@ def sync_visuals_to_alignment(
                     h["narration_start_seconds"] = t
                 prev_t = t
 
-            # GAP-SMOOTHER for highlights. Same logic as architecture.
-            # is-online v5 had a 25.7s gap between L47 and L75; zod had
-            # a 47.6s gap between L22 and L24 (basically the whole audio).
+            # v8 fix: same rule as architecture — never shift an
+            # anchored highlight. Code-walkthrough sync was the user's
+            # other big complaint; the heuristics below were the cause.
             if audio_dur_c > 0 and len(highlights) >= 3:
                 avg_slot_c2 = audio_dur_c / max(1, len(highlights))
                 max_gap_c = avg_slot_c2 * 1.9
                 for i in range(1, len(highlights)):
+                    if i in anchored:
+                        continue  # anchored — hands off
                     prev_t = float(highlights[i - 1].get("narration_start_seconds") or 0)
                     cur_t = float(highlights[i].get("narration_start_seconds") or 0)
                     if cur_t - prev_t > max_gap_c:
                         ideal = prev_t + avg_slot_c2
                         new_t = round((cur_t + ideal) / 2, 2)
                         logger.info(
-                            "Gap-smoother (highlights): L%s %.2fs -> %.2fs",
+                            "Gap-smoother (highlights, fallback only): L%s %.2fs -> %.2fs",
                             highlights[i].get("line_number"), cur_t, new_t,
                         )
                         highlights[i]["narration_start_seconds"] = new_t
 
-            # TAIL-CLUSTER DETECTION for highlights — same algorithm as
-            # the architecture scene above. If 3+ consecutive highlights
-            # land within a tight window, redistribute them across more
-            # of the audio.
+            # v8 fix: tail-cluster only redistributes clusters where
+            # NO highlight is anchored. A real cluster of code lines
+            # discussed in rapid succession is what the narration
+            # actually says — don't spread it artificially.
             if audio_dur_c > 0 and len(highlights) >= 3:
                 avg_slot_c = audio_dur_c / max(1, len(highlights))
                 i = 0
@@ -1329,7 +1356,8 @@ def sync_visuals_to_alignment(
                     ):
                         j += 1
                     run_len = j - i + 1
-                    if run_len >= 3:
+                    cluster_has_anchor = any(k in anchored for k in range(i, j + 1))
+                    if run_len >= 3 and not cluster_has_anchor:
                         start_t = float(highlights[i].get("narration_start_seconds") or 0)
                         target_spread = (run_len - 1) * avg_slot_c * 0.85
                         target_end = min(audio_dur_c - 0.5, start_t + target_spread)
@@ -1343,16 +1371,19 @@ def sync_visuals_to_alignment(
                                 )
                             new = [float(highlights[k]["narration_start_seconds"]) for k in range(i, j + 1)]
                             logger.info(
-                                "Tail-cluster redistribute (highlights): %d-%d %s -> %s",
+                                "Tail-cluster (highlights, fallback only) %d-%d %s -> %s",
                                 i, j, old, new,
                             )
                     i = j + 1
 
-            # IDEAL-POSITION BLEND for highlights — decayed weight, same
-            # rationale as architecture: alignment is most reliable for
-            # the last-mentioned thing, so don't override it.
+            # v8 fix: ideal-blend skips anchored highlights entirely.
+            # Anchored = the actual moment the line content is spoken
+            # per ElevenLabs word alignment. That is the truth; no
+            # "ideal" estimate beats it.
             if audio_dur_c > 0 and len(highlights) >= 3:
                 for i, h in enumerate(highlights):
+                    if i in anchored:
+                        continue  # anchored — hands off
                     progress = i / max(1, len(highlights) - 1)
                     blend_weight_h = 0.30 * (1.0 - progress) + 0.05 * progress
                     actual = float(h.get("narration_start_seconds") or 0.0)
