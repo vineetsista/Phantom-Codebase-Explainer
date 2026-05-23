@@ -67,6 +67,11 @@ class Video(Base):
     # until the summary worker step runs.
     summary_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # v7 — quality signals report. Same data the QualitySignalsPanel
+    # component renders below the video player. Stored on the video so
+    # the panel can render without re-running the analyzer.
+    quality_signals: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
@@ -94,4 +99,5 @@ class Video(Base):
             "user_id": self.user_id,
             "visibility": self.visibility,
             "summary_data": self.summary_data,
+            "quality_signals": self.quality_signals,
         }

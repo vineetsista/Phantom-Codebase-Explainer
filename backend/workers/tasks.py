@@ -117,6 +117,16 @@ def generate_video(self, job_id: str, repo_url: str, options: dict[str, Any]) ->
         except Exception as exc:
             logger.warning("summary generation failed (non-fatal): %s", exc)
 
+        # v7 — quality signals snapshot. Read-only derivation from the
+        # analysis. Render below the video player as a card panel.
+        try:
+            qs = analysis.quality_signals or {}
+            if qs:
+                _update(job_id, quality_signals=qs)
+                logger.info("job=%s wrote %d quality signals", job_id, len(qs))
+        except Exception as exc:
+            logger.warning("quality_signals persist failed (non-fatal): %s", exc)
+
         # Stage 3 — diagram
         _update(
             job_id,

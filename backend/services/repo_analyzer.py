@@ -168,6 +168,10 @@ class AnalysisResult:
     changelog_excerpt: str = ""
     readme_key_paragraphs: list[str] = field(default_factory=list)
     exports_index: list[dict] = field(default_factory=list)
+    # v7 — smart code features
+    framework_context: dict = field(default_factory=dict)
+    the_clever_bit: Optional[dict] = None
+    quality_signals: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -191,6 +195,9 @@ class AnalysisResult:
             "changelog_excerpt": self.changelog_excerpt,
             "readme_key_paragraphs": self.readme_key_paragraphs,
             "exports_index": self.exports_index,
+            "framework_context": self.framework_context,
+            "the_clever_bit": self.the_clever_bit,
+            "quality_signals": self.quality_signals,
         }
 
     @property
@@ -584,6 +591,14 @@ def _scan_source_root(
     changelog_excerpt = _read_changelog(repo_root)
     readme_key_paragraphs = _extract_readme_paragraphs(readme_excerpt)
     exports_index = _build_exports_index(key_files)
+    # v7 — smart code features
+    framework_context = _detect_framework(
+        repo_root, source_root, config_files, languages_pct, key_files
+    )
+    the_clever_bit = _identify_clever_bit(key_files, exports_index)
+    quality_signals = _extract_quality_signals(
+        source_root, repo_root, source_files, top_files, config_files, key_files
+    )
 
     return AnalysisResult(
         repo={
@@ -617,6 +632,9 @@ def _scan_source_root(
         changelog_excerpt=changelog_excerpt,
         readme_key_paragraphs=readme_key_paragraphs,
         exports_index=exports_index,
+        framework_context=framework_context,
+        the_clever_bit=the_clever_bit,
+        quality_signals=quality_signals,
     )
 
 
@@ -1499,3 +1517,413 @@ def _build_exports_index(key_files: list[dict]) -> list[dict]:
             })
     out.sort(key=lambda e: (-e.get("in_degree", 0), e.get("line", 0)))
     return out
+
+
+# ===========================================================================
+# v7 — smart code features
+# ===========================================================================
+
+
+def _detect_framework(
+    repo_root: Path,
+    source_root: Path,
+    config_files: dict[str, str],
+    languages_pct: dict[str, float],
+    key_files: list[dict],
+) -> dict:
+    """Detect the dominant framework + return a structured context the
+    script generator can use to tailor narration. Returns
+    {language, framework, evidence, talking_points}. Evidence is the
+    file/string that triggered the detection — surfaced in the prompt
+    so Claude doesn't have to guess.
+
+    Best-effort. When ambiguous, returns the generic context for the
+    primary language."""
+    out = {
+        "language": "",
+        "framework": "generic",
+        "evidence": "",
+        "talking_points": [],
+    }
+
+    pkg = config_files.get("package.json", "")
+    py_proj = config_files.get("pyproject.toml", "")
+    cargo = config_files.get("Cargo.toml", "")
+    go_mod = config_files.get("go.mod", "")
+    primary = max(languages_pct, key=languages_pct.get) if languages_pct else ""
+    out["language"] = primary
+
+    # TypeScript / JavaScript
+    if primary in ("TypeScript", "JavaScript"):
+        if "next" in pkg or (repo_root / "next.config.js").exists() or (repo_root / "next.config.ts").exists():
+            out.update({
+                "framework": "Next.js",
+                "evidence": "next.config.* or 'next' in package.json",
+                "talking_points": [
+                    "App Router vs Pages Router",
+                    "Server vs Client Components",
+                    "Route segments, layouts, loading states",
+                    "Server Actions and API routes",
+                ],
+            })
+        elif '"@nestjs/' in pkg:
+            out.update({
+                "framework": "NestJS",
+                "evidence": "@nestjs/* in package.json",
+                "talking_points": [
+                    "Modules, controllers, providers",
+                    "Decorators drive the framework",
+                    "Built on Express or Fastify under the hood",
+                ],
+            })
+        elif '"fastify"' in pkg:
+            out.update({
+                "framework": "Fastify",
+                "evidence": "fastify in package.json",
+                "talking_points": [
+                    "JSON Schema-driven routing and serialization",
+                    "Plugin encapsulation",
+                    "Async-first by design",
+                ],
+            })
+        elif '"express"' in pkg:
+            out.update({
+                "framework": "Express",
+                "evidence": "express in package.json",
+                "talking_points": [
+                    "Middleware stack and routing",
+                    "Request/response objects extend Node's IncomingMessage/ServerResponse",
+                    "Minimal core, ecosystem of plugins",
+                ],
+            })
+    # Python
+    elif primary == "Python":
+        # Read a sample of source to look for framework imports.
+        sample = ""
+        for kf in key_files[:3]:
+            sample += (kf.get("code") or "")[:2000] + "\n"
+        if "from django" in sample or "DJANGO_SETTINGS_MODULE" in sample or (repo_root / "manage.py").exists():
+            out.update({
+                "framework": "Django",
+                "evidence": "manage.py or django imports in source",
+                "talking_points": [
+                    "Apps, models, views, URLs",
+                    "ORM + migrations",
+                    "settings.py drives configuration",
+                ],
+            })
+        elif "from fastapi" in sample or "from fastapi import" in sample:
+            out.update({
+                "framework": "FastAPI",
+                "evidence": "fastapi imports in source",
+                "talking_points": [
+                    "Pydantic-driven request/response models",
+                    "Dependency injection via Depends()",
+                    "Async route handlers",
+                    "OpenAPI spec generated automatically",
+                ],
+            })
+        elif "from flask" in sample:
+            out.update({
+                "framework": "Flask",
+                "evidence": "flask imports in source",
+                "talking_points": [
+                    "App factory pattern",
+                    "Blueprints for modular routing",
+                    "Werkzeug under the hood",
+                ],
+            })
+    # Rust
+    elif primary == "Rust":
+        if (source_root / "src" / "main.rs").exists():
+            out.update({
+                "framework": "Rust binary",
+                "evidence": "src/main.rs present",
+                "talking_points": ["Main entry point", "Cargo workspace structure if present"],
+            })
+        elif (source_root / "src" / "lib.rs").exists():
+            out.update({
+                "framework": "Rust library",
+                "evidence": "src/lib.rs present",
+                "talking_points": ["Crate root", "Public re-exports", "Trait implementations"],
+            })
+        if "members =" in cargo or "[workspace]" in cargo:
+            out["framework"] = "Rust workspace"
+    # Go
+    elif primary == "Go":
+        sample = ""
+        for kf in key_files[:3]:
+            sample += (kf.get("code") or "")[:2000] + "\n"
+        if "gin-gonic/gin" in go_mod or "gin-gonic/gin" in sample:
+            out.update({
+                "framework": "Gin",
+                "evidence": "gin-gonic/gin in go.mod or source",
+                "talking_points": ["HTTP router with middleware", "Context-based handler chain"],
+            })
+        elif "labstack/echo" in go_mod:
+            out.update({"framework": "Echo", "evidence": "labstack/echo in go.mod"})
+        elif "gofiber/fiber" in go_mod:
+            out.update({"framework": "Fiber", "evidence": "gofiber/fiber in go.mod"})
+
+    return out
+
+
+# Function names that imply cleverness — flagged for the_clever_bit
+# selector. Score = +5 per match.
+_CLEVER_NAME_HINTS = (
+    "retry", "race", "memoize", "memoise", "debounce", "throttle",
+    "compose", "curry", "pipe", "fold", "reduce", "fan", "compile",
+    "lazy", "memo", "cache", "intern", "dedupe", "diff", "patch",
+    "rebase", "graft", "stitch", "schedule", "yield", "suspend",
+    "supervise", "abort", "settle", "barrier", "fence",
+)
+
+
+def _identify_clever_bit(
+    key_files: list[dict],
+    exports_index: list[dict],
+) -> Optional[dict]:
+    """Heuristic pick of the most interesting function/export in the
+    repo. Returns {file, name, kind, line, signature, why} or None.
+
+    Scoring:
+      +5 if name hints at cleverness (retry, race, memoize, ...)
+      +3 if file has high in_degree
+      +2 if it's the first export of the first key file
+      +1 if signature contains async/await or generics
+    """
+    if not exports_index:
+        return None
+
+    by_file_indegree = {kf["path"]: kf.get("in_degree", 0) for kf in key_files}
+    best = None
+    best_score = -1
+
+    for i, exp in enumerate(exports_index[:40]):
+        name = (exp.get("name") or "").lower()
+        sig = (exp.get("signature") or "")
+        file_path = exp.get("file", "")
+        score = 0
+        why_parts: list[str] = []
+
+        for hint in _CLEVER_NAME_HINTS:
+            if hint in name:
+                score += 5
+                why_parts.append(f"name implies '{hint}' pattern")
+                break
+
+        in_deg = by_file_indegree.get(file_path, 0)
+        if in_deg >= 3:
+            score += 3
+            why_parts.append(f"defined in a heavily-imported file (in-degree {in_deg})")
+
+        if i == 0 and exp.get("kind") in {"function", "class"}:
+            score += 2
+            why_parts.append("first major export of the most-imported file")
+
+        if "async" in sig or "await" in sig:
+            score += 1
+            why_parts.append("async control flow")
+        if "<" in sig and ">" in sig:
+            score += 1
+            why_parts.append("generic / type-parameterized")
+
+        if score > best_score and score >= 4:
+            best_score = score
+            best = {
+                "file": file_path,
+                "name": exp.get("name"),
+                "kind": exp.get("kind"),
+                "line": exp.get("line"),
+                "signature": exp.get("signature"),
+                "why": "; ".join(why_parts) if why_parts else "high-leverage export",
+            }
+    return best
+
+
+def _extract_quality_signals(
+    source_root: Path,
+    repo_root: Path,
+    source_files: list,
+    top_files: list[dict],
+    config_files: dict[str, str],
+    key_files: list[dict],
+) -> dict:
+    """Surface observable signals about the codebase as a structured
+    report. Each signal is {value, label, color, explain} so the frontend
+    panel can render it without re-deriving anything.
+
+    All signals are best-effort and read-only — nothing here writes or
+    needs network access. Returns dict keyed by signal name."""
+    signals: dict[str, dict] = {}
+
+    # --- Test density ----------------------------------------------------
+    test_count = 0
+    src_count = 0
+    for f in source_files:
+        path = f.path
+        if not f.language:
+            continue
+        if _is_test_file(path):
+            test_count += 1
+        else:
+            src_count += 1
+    density = round(test_count / max(1, src_count), 2)
+    if density >= 0.5:
+        color, explain = "green", "Tests for roughly half the source files. Well-covered."
+    elif density >= 0.2:
+        color, explain = "yellow", "Some tests, but uneven coverage."
+    else:
+        color, explain = "red", "Few tests relative to source files."
+    signals["test_density"] = {
+        "value": density,
+        "label": "Test density",
+        "color": color,
+        "explain": explain,
+        "raw": f"{test_count} tests / {src_count} source files",
+    }
+
+    # --- License ---------------------------------------------------------
+    license_text = ""
+    for name in ("LICENSE", "LICENSE.md", "LICENSE.txt"):
+        path = repo_root / name
+        if path.is_file():
+            try:
+                license_text = path.read_text(encoding="utf-8", errors="ignore")[:2000]
+                break
+            except OSError:
+                pass
+    license_label = "Unknown"
+    if license_text:
+        upper = license_text.upper()
+        if "MIT LICENSE" in upper or "MIT " in upper[:200]:
+            license_label = "MIT"
+        elif "APACHE LICENSE" in upper or "APACHE-2.0" in upper:
+            license_label = "Apache 2.0"
+        elif "GPL" in upper[:200]:
+            license_label = "GPL"
+        elif "BSD" in upper[:200]:
+            license_label = "BSD"
+        elif "ISC" in upper[:200]:
+            license_label = "ISC"
+        elif "MOZILLA PUBLIC" in upper:
+            license_label = "MPL"
+        else:
+            license_label = "Custom"
+    signals["license"] = {
+        "value": license_label,
+        "label": "License",
+        "color": "green" if license_label != "Unknown" else "yellow",
+        "explain": (
+            "Clear permissive license." if license_label in {"MIT", "Apache 2.0", "BSD", "ISC"}
+            else "Copyleft license — review terms before redistribution." if license_label == "GPL"
+            else "No license file found." if license_label == "Unknown"
+            else "License present; check terms."
+        ),
+    }
+
+    # --- TypeScript strictness ------------------------------------------
+    ts_config = config_files.get("tsconfig.json", "")
+    if ts_config:
+        is_strict = '"strict": true' in ts_config or '"strict":true' in ts_config
+        signals["typescript_strict"] = {
+            "value": "On" if is_strict else "Off",
+            "label": "TypeScript strict mode",
+            "color": "green" if is_strict else "yellow",
+            "explain": (
+                "Strict mode catches null/undefined bugs at compile time."
+                if is_strict
+                else "Strict mode is off — runtime null/undefined errors more likely."
+            ),
+        }
+
+    # --- Top-file size shape --------------------------------------------
+    if top_files:
+        biggest = top_files[0]
+        big_bytes = biggest.get("bytes", 0)
+        if big_bytes > 80_000:
+            signals["god_file"] = {
+                "value": f"{big_bytes // 1024} KB",
+                "label": "Largest file",
+                "color": "red",
+                "explain": (
+                    f"{biggest['path']} is {big_bytes // 1024} KB — "
+                    "much logic concentrates in one file."
+                ),
+            }
+        elif big_bytes > 30_000:
+            signals["god_file"] = {
+                "value": f"{big_bytes // 1024} KB",
+                "label": "Largest file",
+                "color": "yellow",
+                "explain": f"{biggest['path']} is sizable but reasonable.",
+            }
+
+    # --- Single-language vs polyglot ------------------------------------
+    # (Already in interesting_observations; surfaced again here as a card.)
+
+    # --- Estimated read time --------------------------------------------
+    total_lines = 0
+    for kf in key_files[:5]:
+        code = kf.get("code") or ""
+        total_lines += len(code.splitlines())
+    # Senior engineer reads ~100 LOC/min of dense source.
+    read_min = max(1, round(total_lines / 100))
+    signals["estimated_read_time"] = {
+        "value": f"~{read_min} min",
+        "label": "Read time (top files)",
+        "color": "green" if read_min <= 5 else "yellow" if read_min <= 15 else "red",
+        "explain": (
+            f"Senior engineer's read of the {min(5, len(key_files))} most-imported "
+            f"files ({total_lines} LOC)."
+        ),
+        "raw": f"{total_lines} LOC across {min(5, len(key_files))} files",
+    }
+
+    # --- Documentation coverage (Python/JS docstring + JSDoc heuristic) -
+    doc_hits = 0
+    fn_total = 0
+    for kf in key_files[:3]:
+        code = kf.get("code") or ""
+        if not code:
+            continue
+        lines = code.splitlines()
+        for i, line in enumerate(lines):
+            stripped = line.lstrip()
+            if (stripped.startswith("def ") or stripped.startswith("function ")
+                    or stripped.startswith("export function ")
+                    or stripped.startswith("export async function ")
+                    or stripped.startswith("async function ")
+                    or stripped.startswith("export const ")):
+                fn_total += 1
+                # Look at next 1-3 lines for a docstring / JSDoc above
+                # OR at the previous 1-3 lines for a /** ... */ block.
+                prev = lines[max(0, i - 4) : i]
+                if any(("/**" in p or '"""' in p or "///" in p) for p in prev):
+                    doc_hits += 1
+    if fn_total > 0:
+        ratio = round(doc_hits / fn_total, 2)
+        if ratio >= 0.5:
+            color, explain = "green", "Half or more exports have JSDoc / docstrings."
+        elif ratio >= 0.2:
+            color, explain = "yellow", "Some exports documented, many aren't."
+        else:
+            color, explain = "red", "Most exports have no comments / docstrings."
+        signals["doc_coverage"] = {
+            "value": f"{int(ratio * 100)}%",
+            "label": "Doc coverage",
+            "color": color,
+            "explain": explain,
+            "raw": f"{doc_hits} of {fn_total} exports documented",
+        }
+
+    # --- Has CHANGELOG --------------------------------------------------
+    if (repo_root / "CHANGELOG.md").is_file():
+        signals["changelog_present"] = {
+            "value": "Yes",
+            "label": "Changelog",
+            "color": "green",
+            "explain": "CHANGELOG.md exists — release history is documented.",
+        }
+
+    return signals

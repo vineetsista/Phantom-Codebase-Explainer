@@ -199,6 +199,21 @@ want to mention isn't supported by something in `top_files` or
 `code_excerpt`, pick a different angle. Plausible-sounding code that
 doesn't appear verbatim in the input is forbidden output.
 
+FRAMEWORK CONTEXT. If `framework_context.framework` is set (e.g.
+"Next.js", "FastAPI", "Express"), use the framework's specific
+vocabulary. A FastAPI repo should reference dependency injection /
+async route handlers / Pydantic, not generic "the API". An Express
+repo should talk about middleware, not "the routing thing". The
+`talking_points` array tells you what concepts to mention. Don't list
+them mechanically — weave the relevant ones into the narration.
+
+THE CLEVER BIT. If `the_clever_bit` is set, the code walkthrough
+should feature that function. The `why` field tells you what makes it
+interesting. Don't just describe what it does — explain WHY it earns
+the spotlight (race / retry / memoize patterns, lazy evaluation,
+recursion, type-level cleverness). If `the_clever_bit` is null, pick
+the most interesting export from `exports_index` instead.
+
 MONOREPO HANDLING. If the input includes a `monorepo` field with
 `is_monorepo: true`, acknowledge it once early in the script — usually as
 a beat in the intro or the first sentence of the architecture section.
