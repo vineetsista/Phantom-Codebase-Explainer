@@ -21,4 +21,12 @@ celery_app.conf.update(
     task_time_limit=30 * 60,
     task_soft_time_limit=28 * 60,
     worker_prefetch_multiplier=1,
+    # v7f — priority queue. Pro / Team jobs go on "video.priority", Free
+    # jobs go on "video.free". Workers can subscribe to both with -Q
+    # video.priority,video.free and Celery will prefer the higher-priority
+    # queue. The /generate route routes via app_options['queue'].
+    task_default_queue="video.free",
+    task_routes={
+        "phantom.generate_video": {"queue": "video.free"},
+    },
 )

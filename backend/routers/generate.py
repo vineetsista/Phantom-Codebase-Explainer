@@ -135,7 +135,28 @@ def create_generation(
     worker_options = body.options.model_dump()
     worker_options["intake_kind"] = intake.kind
     worker_options["intake_meta"] = intake_meta
-    generate_video.delay(video.id, normalized_url, worker_options)
+
+    # v7f — priority queue. Free → 'video.free', Pro/Team → 'video.priority'.
+    # When REQUIRE_AUTH is off (dev / v5c legacy), everything goes on
+    # 'video.free' since anonymous = free-tier by default.
+    queue = "video.free"
+    if user is not None:
+        from models.user import Plan
+        plan = user.plan if isinstance(user.plan, Plan) else None
+        if plan in (Plan.pro, Plan.team):
+            queue = "video.priority"
+    worker_options["queue"] = queue
+
+    # v7f — tier-aware render quality. Free tier locked to 720p
+    # regardless of what they sent in `options.quality`. Pro / Team get
+    # whatever they asked for.
+    if user is None or (hasattr(user, "plan") and str(user.plan).endswith("free")):
+        worker_options["quality"] = "720p"
+
+    generate_video.apply_async(
+        args=[video.id, normalized_url, worker_options],
+        queue=queue,
+    )
 
     return GenerateResponse(job_id=video.id, status=video.status.value)
 
@@ -235,6 +256,20 @@ def create_compare(
     worker_options = body.options.model_dump()
     worker_options["intake_kind"] = "compare"
     worker_options["intake_meta"] = intake_meta
-    generate_video.delay(video.id, intake_a.repo_url, worker_options)
+
+    queue = "video.free"
+    if user is not None:
+        from models.user import Plan
+        plan = user.plan if isinstance(user.plan, Plan) else None
+        if plan in (Plan.pro, Plan.team):
+            queue = "video.priority"
+    worker_options["queue"] = queue
+    if user is None or (hasattr(user, "plan") and str(user.plan).endswith("free")):
+        worker_options["quality"] = "720p"
+
+    generate_video.apply_async(
+        args=[video.id, intake_a.repo_url, worker_options],
+        queue=queue,
+    )
 
     return GenerateResponse(job_id=video.id, status=video.status.value)

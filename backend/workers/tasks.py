@@ -237,6 +237,29 @@ def generate_video(self, job_id: str, repo_url: str, options: dict[str, Any]) ->
             job_id, script, audio_files, diagram_path
         )
 
+        # v7f — optional R2 upload. When R2_* env vars are configured we
+        # push the MP4 + thumbnail to Cloudflare R2 and write CDN URLs
+        # onto the Video row. Without credentials, both calls return None
+        # and the worker falls back to the local /media/videos URLs.
+        video_local = Path(output["video_path"])
+        thumb_local = Path(output["thumbnail_path"])
+        try:
+            from services import r2_uploader
+            cdn_video_url = r2_uploader.upload(
+                video_local, f"videos/{video_local.name}", "video/mp4"
+            )
+            cdn_thumb_url = r2_uploader.upload(
+                thumb_local,
+                f"thumbnails/{thumb_local.name}",
+                "image/jpeg" if thumb_local.suffix.lower() == ".jpg" else "image/png",
+            )
+        except Exception as exc:
+            logger.warning("R2 upload step raised (non-fatal): %s", exc)
+            cdn_video_url = cdn_thumb_url = None
+
+        final_video_url = cdn_video_url or f"/media/videos/{video_local.name}"
+        final_thumb_url = cdn_thumb_url or f"/media/thumbnails/{thumb_local.name}"
+
         # Stage 6 — finalize. The assembler mutated `script` in place to
         # add the canonical chapters list — re-persist script_data so the
         # frontend sees chapters alongside the completed video URL.
@@ -246,8 +269,8 @@ def generate_video(self, job_id: str, repo_url: str, options: dict[str, Any]) ->
             progress=100,
             details={"stage": "Complete"},
             script_data=script,
-            video_url=f"/media/videos/{Path(output['video_path']).name}",
-            thumbnail_url=f"/media/thumbnails/{Path(output['thumbnail_path']).name}",
+            video_url=final_video_url,
+            thumbnail_url=final_thumb_url,
             duration_seconds=output["duration_seconds"],
             video_quality=quality,
             completed_at=datetime.utcnow(),

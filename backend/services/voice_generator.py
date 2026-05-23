@@ -473,6 +473,31 @@ def resolve_provider(requested: str | None = None) -> tuple[str, str]:
             logger.warning(new_reason)
             chosen, reason = "mock", new_reason
 
+    # v7f — char budget gate. ElevenLabs charges per character. Once the
+    # monthly budget is exhausted, downgrade to OpenAI for the rest of
+    # the month so we don't accidentally torch the budget on one viral
+    # day. Best-effort: when Redis is unavailable we can't read the
+    # counter, so we let ElevenLabs through (better to overshoot than
+    # silently downgrade everyone on a Redis outage).
+    if chosen == "elevenlabs":
+        try:
+            from utils.char_budget import should_use_elevenlabs
+            if not should_use_elevenlabs():
+                if settings.has_openai:
+                    fallback_reason = (
+                        f"{reason}; monthly ElevenLabs char budget exhausted "
+                        "— downgraded to OpenAI"
+                    )
+                    logger.warning(fallback_reason)
+                    chosen, reason = "openai", fallback_reason
+                else:
+                    logger.warning(
+                        "char budget exhausted but no OpenAI key — keeping "
+                        "ElevenLabs (over budget by definition)"
+                    )
+        except Exception as exc:
+            logger.warning("char_budget check skipped: %s", exc)
+
     logger.info("Voice provider selected: %s (%s)", chosen, reason)
     return chosen, reason
 
@@ -544,6 +569,12 @@ def generate(
                     voice_id=settings.default_elevenlabs_voice_id,
                     model_id=settings.elevenlabs_model_id,
                 )
+                # v7f — record characters consumed for the monthly budget.
+                try:
+                    from utils.char_budget import record_usage
+                    record_usage(len(prepared))
+                except Exception as exc:
+                    logger.debug("char_budget record skipped: %s", exc)
             else:
                 raise TTSConfigError(f"Unknown TTS provider: {chosen!r}")
         except TTSConfigError:
