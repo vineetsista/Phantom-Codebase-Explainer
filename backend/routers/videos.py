@@ -1,15 +1,37 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from models import Video, get_db
+from models import User, Video, get_db
+from routers.users import optional_user
 
 router = APIRouter(prefix="/api/v1", tags=["videos"])
 
 
 @router.get("/videos")
-def list_videos(db: Session = Depends(get_db), limit: int = 50) -> dict:
-    stmt = select(Video).order_by(Video.created_at.desc()).limit(limit)
+def list_videos(
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(optional_user),
+    limit: int = 50,
+    mine: bool = False,
+    status_filter: Optional[str] = None,
+) -> dict:
+    """List videos. With `mine=true`, scopes to the authenticated user's
+    own videos (any visibility). Without auth, returns public videos.
+    Used by the dashboard history page (mine=true) and the public
+    showcase (mine=false default)."""
+    stmt = select(Video).order_by(Video.created_at.desc())
+    if mine:
+        if user is None:
+            raise HTTPException(status_code=401, detail="Sign in to see your videos.")
+        stmt = stmt.where(Video.user_id == user.id)
+    else:
+        stmt = stmt.where(Video.visibility == "public")
+    if status_filter:
+        stmt = stmt.where(Video.status == status_filter)
+    stmt = stmt.limit(min(limit, 200))
     videos = db.execute(stmt).scalars().all()
     return {"videos": [v.to_dict() for v in videos]}
 
