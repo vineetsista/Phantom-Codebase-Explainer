@@ -46,19 +46,6 @@ class Settings(BaseSettings):
 
     remotion_project_dir: str = "/app/remotion"
 
-    # === Stripe (v6 Phase 2) ===
-    # Empty by default — billing endpoints return 503 when not configured.
-    # Wire up by creating products at https://dashboard.stripe.com/products
-    # and pasting the keys here / in env.
-    stripe_secret_key: str = ""
-    stripe_webhook_secret: str = ""
-    stripe_pro_price_id: str = ""
-    stripe_team_price_id: str = ""
-
-    @property
-    def has_stripe(self) -> bool:
-        return bool(self.stripe_secret_key) and self.stripe_secret_key.startswith(("sk_test_", "sk_live_"))
-
     @property
     def has_claude(self) -> bool:
         return bool(self.anthropic_api_key) and not self.anthropic_api_key.startswith("your_")

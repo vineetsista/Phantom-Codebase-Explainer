@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from models import ApiKey, Plan, User, generate_key, get_db
+from models import ApiKey, User, generate_key, get_db
 from routers.users import require_user
 
 logger = logging.getLogger(__name__)
@@ -32,14 +32,6 @@ def create_api_key(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    # Pro+ only.
-    plan = user.plan if isinstance(user.plan, Plan) else Plan(user.plan)
-    if plan == Plan.free:
-        raise HTTPException(
-            status_code=403,
-            detail="API keys require Pro. Upgrade to generate programmatically.",
-        )
-
     name = (body.name or "").strip()[:120] or "Untitled key"
     plaintext, prefix, key_hash = generate_key()
     record = ApiKey(

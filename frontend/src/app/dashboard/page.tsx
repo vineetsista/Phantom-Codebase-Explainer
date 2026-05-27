@@ -20,9 +20,6 @@ interface MeData {
   avatar_url: string;
   bio?: string;
   custom_slug?: string;
-  plan: "free" | "pro" | "team";
-  plan_limit: number;
-  monthly_video_count: number;
 }
 interface VideoRow {
   id: string;
@@ -85,12 +82,6 @@ export default async function DashboardPage() {
   ]);
   if (!me) redirect("/login?next=/dashboard");
 
-  const usagePct = Math.min(100, (me.monthly_video_count / me.plan_limit) * 100);
-  const usageColor =
-    usagePct >= 90 ? "bg-rose-400"
-    : usagePct >= 70 ? "bg-amber-400"
-    : "bg-electric";
-
   return (
     <section className="mx-auto max-w-6xl px-6 pb-32 pt-20">
       {/* Header */}
@@ -115,37 +106,8 @@ export default async function DashboardPage() {
         </div>
       </header>
 
-      {/* Usage + quick generate row */}
-      <div className="mt-12 grid gap-6 md:grid-cols-[1.2fr_1fr]">
-        <div className="rounded-2xl border border-white/10 bg-graphite/40 p-6 backdrop-blur">
-          <div className="flex items-baseline justify-between">
-            <div className="kicker">Usage this month</div>
-            <div className="font-mono text-xs uppercase tracking-wider text-mist">
-              {me.plan.toUpperCase()} · {me.plan_limit}/mo
-            </div>
-          </div>
-          <div className="mt-4 flex items-baseline gap-2">
-            <span className="font-display text-4xl font-bold text-bone">
-              {me.monthly_video_count}
-            </span>
-            <span className="text-fog">of {me.plan_limit} videos</span>
-          </div>
-          <div className="mt-4 h-2 overflow-hidden rounded-full bg-ink">
-            <div
-              className={`h-full transition-all duration-500 ${usageColor}`}
-              style={{ width: `${usagePct}%` }}
-            />
-          </div>
-          {me.plan === "free" && usagePct >= 60 && (
-            <Link
-              href="/#pricing"
-              className="mt-5 inline-block text-sm text-electric hover:underline"
-            >
-              Approaching limit — upgrade to Pro →
-            </Link>
-          )}
-        </div>
-
+      {/* Quick generate row */}
+      <div className="mt-12 grid gap-6">
         <div className="rounded-2xl border border-white/10 bg-graphite/40 p-6 backdrop-blur">
           <div className="kicker">Generate</div>
           <h2 className="mt-2 font-display text-xl font-semibold text-bone">
@@ -258,22 +220,30 @@ export default async function DashboardPage() {
         >
           History
         </Link>
-        {me.plan !== "free" && (
-          <Link
-            href="/dashboard/api-keys"
-            className="rounded-full border border-white/10 px-4 py-2 text-bone transition-colors hover:border-electric/40 hover:text-electric"
-          >
-            API keys
-          </Link>
-        )}
-        <form action="/api/v1/billing/portal" method="POST">
-          <button
-            type="submit"
-            className="rounded-full border border-white/10 px-4 py-2 text-bone transition-colors hover:border-electric/40 hover:text-electric"
-          >
-            Manage subscription
-          </button>
-        </form>
+        <Link
+          href="/dashboard/api-keys"
+          className="rounded-full border border-white/10 px-4 py-2 text-bone transition-colors hover:border-electric/40 hover:text-electric"
+        >
+          API keys
+        </Link>
+        <Link
+          href="/dashboard/analytics"
+          className="rounded-full border border-white/10 px-4 py-2 text-bone transition-colors hover:border-electric/40 hover:text-electric"
+        >
+          Analytics
+        </Link>
+        <Link
+          href="/dashboard/favorites"
+          className="rounded-full border border-white/10 px-4 py-2 text-bone transition-colors hover:border-electric/40 hover:text-electric"
+        >
+          Favorites
+        </Link>
+        <Link
+          href="/dashboard/settings"
+          className="rounded-full border border-white/10 px-4 py-2 text-bone transition-colors hover:border-electric/40 hover:text-electric"
+        >
+          Settings
+        </Link>
       </div>
     </section>
   );

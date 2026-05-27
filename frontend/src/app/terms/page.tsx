@@ -32,15 +32,9 @@ export default function TermsPage() {
 
         <Block title="Your account">
           Sign-in is via GitHub OAuth. You&apos;re responsible for what happens
-          under your account. Sharing API keys (Pro tier) with third parties is
-          allowed — but rate limits and quotas count against your account.
-        </Block>
-
-        <Block title="Plans + billing">
-          Free, Pro ($19/mo), Team ($49/mo). Quotas reset on the first day of
-          each calendar month. We don&apos;t prorate downgrades. Cancellations
-          take effect at the end of the current billing period. Stripe is the
-          processor; we never store your card details.
+          under your account. API keys (issuable from /dashboard/api-keys)
+          can be shared if you choose — rate limits count against your
+          account.
         </Block>
 
         <Block title="Your content">

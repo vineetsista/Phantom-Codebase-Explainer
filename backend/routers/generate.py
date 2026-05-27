@@ -1,4 +1,3 @@
-import os
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -6,18 +5,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from models import User, Video, VideoStatus, get_db
-from routers.users import check_quota, increment_usage, optional_user
+from routers.users import optional_user
 from utils.intake import classify as classify_intake
 from utils.rate_limit import check_rate_limit
 from workers.tasks import generate_video
 
 router = APIRouter(prefix="/api/v1", tags=["generate"])
-
-# Feature flag: when False, /generate accepts anonymous requests (legacy
-# behavior). When True, signin is required and quotas enforced. Set
-# REQUIRE_AUTH=1 in the environment to flip on. Default False so v5c
-# rendering keeps working during the v6 rollout.
-REQUIRE_AUTH = os.environ.get("REQUIRE_AUTH", "0") == "1"
 
 
 class GenerateOptions(BaseModel):
@@ -45,21 +38,17 @@ def create_generation(
     db: Session = Depends(get_db),
     user: Optional[User] = Depends(optional_user),
 ) -> GenerateResponse:
-    # v7d — classify the URL. Handles plain repo URLs, commit URLs,
-    # file (blob) URLs, gists, and PRs. validate_repo_url's host/IP
-    # checks run inside the classifier's "repo" fallback, so blocked
-    # hosts still raise. We pin the actual repo target via
-    # intake.repo_url so the rest of the pipeline still gets a normal
-    # GitHub repo URL.
+    # Classify the URL. Handles plain repo URLs, commit URLs, file (blob)
+    # URLs, gists, and PRs. validate_repo_url's host/IP checks run inside
+    # the classifier's "repo" fallback, so blocked hosts still raise.
     try:
         intake = classify_intake(body.repo_url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     normalized_url = intake.repo_url
 
-    # v7 — rate limit. Per-IP for anonymous, per-user when authenticated.
-    # Generate is expensive (~$0.18/render) so we cap aggressively. Both
-    # limits enforced — a logged-in user from one IP still gets capped.
+    # Rate limit. Per-IP for anonymous, per-user when authenticated.
+    # Generate is expensive (~$0.18/render) so we cap aggressively.
     client_ip = (
         request.headers.get("x-forwarded-for", "").split(",")[0].strip()
         or (request.client.host if request.client else "unknown")
@@ -72,31 +61,14 @@ def create_generation(
     if user is not None:
         check_rate_limit(
             key=f"generate:user:{user.id}",
-            limit=100,  # never more than 100/hr per user, regardless of plan
+            limit=100,
             window_seconds=3600,
         )
 
     owner, name = intake.owner, intake.name
-
-    # Auth + quota check — gated behind REQUIRE_AUTH flag so dev / v5c
-    # rendering doesn't break before the frontend OAuth ships.
-    if REQUIRE_AUTH:
-        if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Sign in to generate videos.",
-            )
-        check_quota(user)
-        # Free tier locks visibility to public, voice to default.
-        from models.user import Plan
-        is_free = (user.plan == Plan.free if isinstance(user.plan, Plan)
-                   else user.plan == "free")
-        visibility = (
-            "public" if is_free
-            else (body.options.visibility or user.default_visibility or "public")
-        )
-    else:
-        visibility = body.options.visibility or "public"
+    visibility = body.options.visibility or (
+        user.default_visibility if user else None
+    ) or "public"
 
     intake_meta = {
         k: v for k, v in {
@@ -127,35 +99,17 @@ def create_generation(
     db.commit()
     db.refresh(video)
 
-    # Charge quota at queue admission so transient render failures don't
-    # double-bill on retry.
-    if REQUIRE_AUTH and user is not None:
-        increment_usage(user, db)
-
     worker_options = body.options.model_dump()
     worker_options["intake_kind"] = intake.kind
     worker_options["intake_meta"] = intake_meta
-
-    # v7f — priority queue. Free → 'video.free', Pro/Team → 'video.priority'.
-    # When REQUIRE_AUTH is off (dev / v5c legacy), everything goes on
-    # 'video.free' since anonymous = free-tier by default.
-    queue = "video.free"
-    if user is not None:
-        from models.user import Plan
-        plan = user.plan if isinstance(user.plan, Plan) else None
-        if plan in (Plan.pro, Plan.team):
-            queue = "video.priority"
-    worker_options["queue"] = queue
-
-    # v7f — tier-aware render quality. Free tier locked to 720p
-    # regardless of what they sent in `options.quality`. Pro / Team get
-    # whatever they asked for.
-    if user is None or (hasattr(user, "plan") and str(user.plan).endswith("free")):
-        worker_options["quality"] = "720p"
+    # The worker subscribes to both `video.priority` and `video.free`.
+    # Without plans, everything goes on `video.free` — kept the routing
+    # in place because the docker-compose `-Q` flag still references it.
+    worker_options["queue"] = "video.free"
 
     generate_video.apply_async(
         args=[video.id, normalized_url, worker_options],
-        queue=queue,
+        queue="video.free",
     )
 
     return GenerateResponse(job_id=video.id, status=video.status.value)
@@ -183,8 +137,7 @@ def create_compare(
 ) -> GenerateResponse:
     """Compare-two-repos mode. Queues a single Video row that walks two
     codebases side by side: shared concepts, divergent choices, and a
-    "which would I reach for" close. Counts as 2x quota since the
-    analyzer + script pipeline runs twice."""
+    "which would I reach for" close."""
     try:
         intake_a = classify_intake(body.repo_url_a)
         intake_b = classify_intake(body.repo_url_b)
@@ -212,18 +165,9 @@ def create_compare(
         window_seconds=3600,
     )
 
-    if REQUIRE_AUTH:
-        if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Sign in to generate comparisons.",
-            )
-        # Comparisons cost 2x quota — burn two units.
-        check_quota(user)
-        check_quota(user)
-        visibility = body.options.visibility or user.default_visibility or "public"
-    else:
-        visibility = body.options.visibility or "public"
+    visibility = body.options.visibility or (
+        user.default_visibility if user else None
+    ) or "public"
 
     intake_meta = {
         "compared_repo_url": intake_b.repo_url,
@@ -249,27 +193,14 @@ def create_compare(
     db.commit()
     db.refresh(video)
 
-    if REQUIRE_AUTH and user is not None:
-        increment_usage(user, db)
-        increment_usage(user, db)
-
     worker_options = body.options.model_dump()
     worker_options["intake_kind"] = "compare"
     worker_options["intake_meta"] = intake_meta
-
-    queue = "video.free"
-    if user is not None:
-        from models.user import Plan
-        plan = user.plan if isinstance(user.plan, Plan) else None
-        if plan in (Plan.pro, Plan.team):
-            queue = "video.priority"
-    worker_options["queue"] = queue
-    if user is None or (hasattr(user, "plan") and str(user.plan).endswith("free")):
-        worker_options["quality"] = "720p"
+    worker_options["queue"] = "video.free"
 
     generate_video.apply_async(
         args=[video.id, intake_a.repo_url, worker_options],
-        queue=queue,
+        queue="video.free",
     )
 
     return GenerateResponse(job_id=video.id, status=video.status.value)

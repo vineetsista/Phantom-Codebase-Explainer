@@ -4,7 +4,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Compass,
   CornerDownLeft,
-  CreditCard,
   Github,
   LayoutDashboard,
   Search,
@@ -77,12 +76,12 @@ const STATIC_COMMANDS: Command[] = [
     run: (r) => r.push("/admin"),
   },
   {
-    id: "pricing",
-    label: "View pricing",
-    hint: "G P",
-    icon: CreditCard,
-    keywords: ["pricing", "plans", "upgrade", "pro"],
-    run: (r) => r.push("/#pricing"),
+    id: "trending",
+    label: "See trending videos",
+    hint: "G T",
+    icon: Zap,
+    keywords: ["trending", "popular", "top"],
+    run: (r) => r.push("/trending"),
   },
   {
     id: "status",

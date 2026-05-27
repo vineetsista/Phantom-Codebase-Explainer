@@ -5,7 +5,7 @@ Phantom sends a small handful of transactional emails:
   - welcome             — sent on signup (one-shot)
   - generation_complete — sent when a video finishes rendering, if the
                           user opted in (email_on_complete=True)
-  - milestone           — first 100 views; first Pro upgrade; etc.
+  - milestone           — first 100 views, etc.
   - first_video_followup — 24h after their first video if they
                           haven't generated a second (gentle nudge)
 
@@ -90,16 +90,15 @@ def send_welcome(to: str, name: str) -> EmailResult:
     subject = "Welcome to Phantom"
     html = f"""\
 <p>Hey {name or 'there'} —</p>
-<p>You're in. Phantom turns any public GitHub repo into a short narrated video walkthrough. Drop a URL on
-<a href="https://phantom.video">phantom.video</a> and the first video lands in a couple of minutes.</p>
-<p>You get three free videos every month. <a href="https://phantom.video/pricing">Pro plans</a> unlock higher
-quality, longer videos, and private renders.</p>
-<p>If you reply to this email, it goes to a human (me, Vineet).</p>
+<p>You're in. Phantom turns any public GitHub repo into a short narrated video walkthrough. Drop a URL on the
+home page and the first video lands in a couple of minutes.</p>
+<p>Phantom is a portfolio project — open source on GitHub, free to use, no plans, no quotas.</p>
+<p>If you reply to this email, it goes to a human.</p>
 """
     text = (
-        f"Hey {name or 'there'} — welcome to Phantom. Drop a GitHub URL on phantom.video "
-        "and the first video lands in a couple of minutes. Three free videos a month; Pro plans "
-        "unlock higher quality, longer videos, and private renders. Replies go to a human."
+        f"Hey {name or 'there'} — welcome to Phantom. Drop a GitHub URL on the home page "
+        "and the first video lands in a couple of minutes. Phantom is an open-source portfolio project — "
+        "free to use, no plans, no quotas. Replies go to a human."
     )
     return _send(to, subject, html, text)
 

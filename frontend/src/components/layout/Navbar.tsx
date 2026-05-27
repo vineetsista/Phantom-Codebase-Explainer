@@ -10,8 +10,8 @@ import { cn } from "@/lib/utils";
 const links = [
   { href: "/generate", label: "Generate" },
   { href: "/showcase", label: "Showcase" },
+  { href: "/trending", label: "Trending" },
   { href: "/#how", label: "How it works" },
-  { href: "/#pricing", label: "Pricing" },
 ];
 
 export function Navbar() {

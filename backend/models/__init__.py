@@ -11,13 +11,13 @@ from .social import (
     Share,
     VideoView,
 )
-from .user import PLAN_LIMITS, Plan, User
+from .user import User
 from .video import Video, VideoStatus
 
 __all__ = [
     "Base", "SessionLocal", "engine", "get_db", "init_db",
     "Video", "VideoStatus",
-    "User", "Plan", "PLAN_LIMITS",
+    "User",
     "ApiKey", "generate_key", "hash_key",
     "Favorite", "Reaction", "ReactionEmoji", "REACTION_EMOJI_DISPLAY",
     "Comment", "Collection", "CollectionVideo", "Share", "VideoView",

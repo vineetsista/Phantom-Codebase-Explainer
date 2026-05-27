@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
-from models import Plan, User, get_db
+from models import User, get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["users"])
@@ -39,7 +39,7 @@ def upsert_user(body: UpsertUserBody, db: Session = Depends(get_db)) -> dict:
     """Called by the Next.js NextAuth callback after a GitHub login.
 
     Creates the user row if it doesn't exist; updates display fields if
-    it does. Returns the user record so the frontend can stash plan +
+    it does. Returns the user record so the frontend can stash profile +
     quota info in the session for paywall UI.
     """
     if not body.github_id or not body.github_username:
@@ -53,7 +53,6 @@ def upsert_user(body: UpsertUserBody, db: Session = Depends(get_db)) -> dict:
             email=body.email or "",
             name=body.name or body.github_username,
             avatar_url=body.avatar_url or "",
-            plan=Plan.free,
         )
         db.add(user)
         logger.info("Created user %s (github=%s)", user.id, user.github_username)
@@ -368,37 +367,3 @@ def get_user_profile(slug: str, db: Session = Depends(get_db)) -> dict:
     }
 
 
-def check_quota(user: User) -> None:
-    """Raise 429 with a clear upgrade message if the user has hit the
-    monthly limit. Resets monthly_video_count if the period has rolled
-    over since last increment."""
-    now = datetime.utcnow()
-    # Reset on month boundary (simple — based on calendar month, not
-    # 30-day rolling).
-    if user.monthly_count_reset_at is None or (
-        user.monthly_count_reset_at.year != now.year
-        or user.monthly_count_reset_at.month != now.month
-    ):
-        user.monthly_video_count = 0
-        user.monthly_count_reset_at = now
-
-    if user.monthly_video_count >= user.plan_limit:
-        plan_name = user.plan.value if isinstance(user.plan, Plan) else user.plan
-        next_tier = "Pro" if plan_name == "free" else "Team"
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=(
-                f"You've used all {user.plan_limit} videos this month on the "
-                f"{plan_name} plan. Upgrade to {next_tier} for "
-                f"{30 if next_tier == 'Pro' else 200} videos/month."
-            ),
-        )
-
-
-def increment_usage(user: User, db: Session) -> None:
-    """Bump the monthly count + commit. Called when a generation
-    successfully kicks off (not when it completes — we charge on
-    queue admission so retries on transient failures don't double-bill).
-    """
-    user.monthly_video_count = (user.monthly_video_count or 0) + 1
-    db.commit()

@@ -5,7 +5,6 @@ import { Navbar } from "@/components/layout/Navbar";
 import { AnalyticsScripts } from "@/components/shared/AnalyticsScripts";
 import { CommandPalette } from "@/components/shared/CommandPalette";
 import { CursorFollower } from "@/components/shared/CursorFollower";
-import { ExitIntentPopup } from "@/components/shared/ExitIntentPopup";
 import { GrainOverlay } from "@/components/shared/GrainOverlay";
 import { JsonLd } from "@/components/shared/JsonLd";
 import { PageTransition } from "@/components/shared/PageTransition";
@@ -136,7 +135,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <PageTransition>{children}</PageTransition>
             </main>
             <Footer />
-            <ExitIntentPopup />
             <CommandPalette />
           </ToasterProvider>
         </SessionProvider>

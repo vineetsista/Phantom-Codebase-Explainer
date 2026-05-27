@@ -20,8 +20,6 @@ export type PhantomEvent =
   | "video_completed"
   | "share_clicked"
   | "download_clicked"
-  | "pricing_viewed"
-  | "pricing_tier_clicked"
   | "signup_started"
   | "signup_completed"
   | "showcase_video_clicked"

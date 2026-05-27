@@ -5,7 +5,7 @@ import { SHOWCASE_REPOS } from "@/lib/showcase";
 export default function sitemap(): MetadataRoute.Sitemap {
   const base = process.env.NEXT_PUBLIC_APP_URL || "https://phantom.video";
   const now = new Date();
-  const fixed = ["", "/generate", "/showcase", "/pricing"].map((path) => ({
+  const fixed = ["", "/generate", "/showcase", "/trending", "/search"].map((path) => ({
     url: `${base}${path}`,
     lastModified: now,
     changeFrequency: "weekly" as const,

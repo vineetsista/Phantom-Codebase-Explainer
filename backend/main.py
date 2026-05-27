@@ -16,7 +16,6 @@ from routers import (
     analytics,
     api_keys,
     badge,
-    billing,
     generate,
     onboarding,
     share_tools,
@@ -83,7 +82,6 @@ app.include_router(generate.router)
 app.include_router(status.router)
 app.include_router(videos.router)
 app.include_router(users.router)
-app.include_router(billing.router)
 app.include_router(badge.router)
 app.include_router(api_keys.router)
 app.include_router(social.router)

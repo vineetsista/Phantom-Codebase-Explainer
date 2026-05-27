@@ -7,27 +7,27 @@ import { useState } from "react";
 const items = [
   {
     q: "What kinds of repos work best?",
-    a: "Anything up to roughly 100MB on the free tier. Public works out of the box; private needs a personal access token. The analyzer handles 12+ languages — TypeScript, Python, Go, Rust, Java, Ruby, and friends. Tiny single-file demos work but get short videos; gigantic monorepos may take longer to render.",
+    a: "Anything up to roughly 100MB. Public repos work out of the box. The analyzer handles 12+ languages — TypeScript, Python, Go, Rust, Java, Ruby, and friends. Tiny single-file demos get short videos; gigantic monorepos may take a while to render.",
   },
   {
     q: "How long does generation take?",
-    a: "Most repos finish in 2 to 5 minutes. Larger codebases on the free tier may queue. Pro users skip the queue entirely.",
+    a: "Most repos finish in 8 to 15 minutes. Two scenes (architecture + code walkthrough) render in parallel via Remotion; the assemble + mux step is ffmpeg-bound.",
   },
   {
     q: "Where does the narration come from?",
-    a: "By default, OpenAI's tts-1-hd voice. Pro users can switch to ElevenLabs for premium voices. The script itself is written by Claude based on the actual repo analysis — not generic templates.",
+    a: "ElevenLabs Antoni voice by default (OpenAI tts-1-hd as fallback when no ElevenLabs key is configured). The script itself is written by Claude Sonnet 4.5 based on the actual repo analysis — not generic templates. Word-level alignment data drives the visual sync so module reveals and code highlights land exactly when the narrator speaks them.",
   },
   {
-    q: "Can I use private repositories?",
-    a: "Not yet — private repo support is the next thing shipping. Public repos work today. When private lands, your GitHub personal access token will be encrypted at rest, scoped to read-only, and used once per generation. Tokens will never be logged. Repos are cloned to ephemeral storage and deleted the moment the video renders.",
+    q: "Is this a real product or a project?",
+    a: "Portfolio project — open source on GitHub. No plans, no quotas, no Stripe. Clone it, drop your own API keys in .env, and run docker-compose up.",
   },
   {
     q: "Who owns the video?",
-    a: "You do. Phantom keeps a watermarked copy for free tier; Pro and Studio tiers are watermark-free and yours to use anywhere — internal docs, YouTube, talks, your portfolio.",
+    a: "Whoever generated it. The MP4s live in your local /output directory (or Cloudflare R2 when R2_* env vars are set). Phantom adds a small watermark by default, configurable in /dashboard/settings.",
   },
   {
-    q: "Can I customize the video?",
-    a: "Pro adds API access so you can script the generation. Studio adds custom branding, intro/outro cards, and a white-label embed. A full template editor is on the roadmap.",
+    q: "Can I trigger generation programmatically?",
+    a: "Yes — create an API key at /dashboard/api-keys, then POST to /api/v1/generate with the X-Phantom-Key header. The intake classifier accepts plain repo URLs, commit URLs, file (blob) URLs, gists, and PRs.",
   },
 ];
 
